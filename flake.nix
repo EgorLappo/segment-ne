@@ -12,7 +12,6 @@
 
   outputs =
     {
-      self,
       nixpkgs,
       naersk,
       flake-utils,
@@ -33,7 +32,7 @@
           openblas
         ];
       in
-      rec {
+      {
         # For `nix build` & `nix run`:
         defaultPackage = naersk'.buildPackage {
           src = ./.;

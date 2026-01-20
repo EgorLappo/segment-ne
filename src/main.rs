@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{bail, Result};
+use itertools::Itertools;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -40,15 +41,7 @@ fn main() -> Result<()> {
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
-                writeln!(
-                    file,
-                    "{:?}",
-                    result
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )?;
+                writeln!(file, "{:?}", result.iter().format(" "))?;
             }
         }
         Command::Boot { seed } => {
@@ -73,18 +66,27 @@ fn main() -> Result<()> {
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
-                writeln!(
-                    file,
-                    "{:?}",
-                    result
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )?;
+                writeln!(file, "{:?}", result.iter().format(" "))?;
             }
         }
-        Command::Sample { seed } => todo!(),
+        Command::Sample {
+            seed,
+            warmup,
+            sampling,
+        } => {
+            use mcmc::*;
+
+            let data = data::read_divergences(opts.input)?;
+
+            let mut chain = Chain::new(&data, parameters);
+
+            let s = chain.run(warmup, sampling, seed);
+
+            let mut file = std::fs::File::create(opts.output)?;
+            for (ll, step_vals) in s.iter() {
+                writeln!(file, "{:?},{}", ll, step_vals.iter().format(" "))?;
+            }
+        }
     };
 
     // match mode.as_str() {
@@ -200,5 +202,17 @@ enum Command {
             default_value_t = 231
         )]
         seed: u64,
+        #[arg(
+            value_name = "STEPS",
+            help = "number of warmup steps",
+            default_value_t = 1000
+        )]
+        warmup: usize,
+        #[arg(
+            value_name = "STEPS",
+            help = "number of sampling steps",
+            default_value_t = 5000
+        )]
+        sampling: usize,
     },
 }

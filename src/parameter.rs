@@ -33,6 +33,15 @@ impl ParameterList {
         self.fit.len()
     }
 
+    pub fn fit(&self) -> &[f64] {
+        &self.fit
+    }
+
+    pub fn set_fit(&mut self, val: &[f64]) {
+        self.fit = val.into();
+    }
+
+    // TODO: impl Iterator/Iter?
     pub fn substitute(&self, val: &[f64]) -> Box<[f64]> {
         debug_assert!(val.len() == self.num_fit());
 

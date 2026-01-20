@@ -3412,6 +3412,7 @@ dependencies = [
  "color-eyre",
  "criterion",
  "env_logger 0.11.8",
+ "itertools 0.14.0",
  "log",
  "logsumexp",
  "ndarray",
