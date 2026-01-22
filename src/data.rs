@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use color_eyre::eyre::{eyre, Result, WrapErr};
 use polars::prelude::*;
 
-const MU: f64 = 2.5e-8;
+const MU: f64 = 1.2e-8;
 
 // struct to hold number of differences and "length"
 // for a single pairwise intersection of segments

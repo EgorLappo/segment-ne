@@ -7,6 +7,8 @@ edition = "2024"
 clap = { version = "4.5.53", features = ["derive"] }
 color-eyre = "0.6.5"
 env_logger = { version = "0.11.8", features = ["humantime"] }
+indicatif = "0.18.3"
+indicatif-log-bridge = "0.2.3"
 itertools = "0.14.0"
 log = "0.4.29"
 logsumexp = "0.1.0"

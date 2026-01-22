@@ -1,3 +1,4 @@
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use rand_distr::StandardNormal;
 
@@ -72,12 +73,6 @@ impl Chain {
 
         let log_ratio = new_loglik - self.loglik;
 
-        log::info!(
-            "step: new params {:?}; log_ratio {:.02}",
-            new_nfit,
-            log_ratio
-        );
-
         if rand::random::<f64>() <= log_ratio.exp() {
             // accept
             self.n.set_fit(&new_nfit);
@@ -91,18 +86,39 @@ impl Chain {
         self.step_count += 1.;
     }
 
-    pub fn run(&mut self, warmup: usize, sampling: usize, seed: u64) -> Vec<(f64, Box<[f64]>)> {
+    pub fn run(
+        &mut self,
+        warmup: usize,
+        sampling: usize,
+        seed: u64,
+        bar: MultiProgress,
+    ) -> Vec<(f64, Box<[f64]>)> {
         let mut samples = Vec::with_capacity(sampling);
         let mut rng = SmallRng::seed_from_u64(seed);
 
+        let pb = bar.add(ProgressBar::new((warmup + sampling) as u64));
+        let style = ProgressStyle::with_template(
+            "{spinner:.purple} {prefix}: [{elapsed}/{duration}] [{bar:.cyan/blue}] {human_pos}/{human_len}",
+        )
+        .unwrap();
+        pb.set_style(style);
+
+        pb.set_prefix("warmup");
         for _ in 0..warmup {
             self.step(&mut rng);
+
+            pb.inc(1);
         }
 
+        pb.set_prefix("sampling");
         for _ in 0..sampling {
             self.step(&mut rng);
             samples.push((self.loglik, self.n.fit().into()));
+
+            pb.inc(1);
         }
+
+        pb.finish();
 
         samples
     }

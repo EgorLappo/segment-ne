@@ -11,7 +11,8 @@ mod optim;
 mod parameter;
 
 fn main() -> Result<()> {
-    env_logger::init();
+    let logger =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).build();
     color_eyre::install()?;
     let opts = Opts::parse();
 
@@ -71,80 +72,44 @@ fn main() -> Result<()> {
         }
         Command::Sample {
             seed,
+            chains,
             warmup,
             sampling,
         } => {
             use mcmc::*;
 
+            let bar = indicatif::MultiProgress::new();
+            indicatif_log_bridge::LogWrapper::new(bar.clone(), logger).try_init()?;
+
             let data = data::read_divergences(opts.input)?;
 
-            let mut chain = Chain::new(&data, parameters);
+            let handles: Vec<_> = (0..chains)
+                .map(|_| {
+                    let data = data.clone();
+                    let parameters = parameters.clone();
+                    let bar = bar.clone();
+                    std::thread::spawn(move || {
+                        let mut chain = Chain::new(&data, parameters);
 
-            let s = chain.run(warmup, sampling, seed);
+                        chain.run(warmup, sampling, seed, bar)
+                    })
+                })
+                .collect();
+
+            let mut samples = Vec::new();
+
+            for h in handles.into_iter() {
+                let chain_samples = h.join().expect("could not join on a thread");
+                samples.extend_from_slice(&chain_samples);
+            }
 
             let mut file = std::fs::File::create(opts.output)?;
-            for (ll, step_vals) in s.iter() {
+
+            for (ll, step_vals) in samples.iter() {
                 writeln!(file, "{:?},{}", ll, step_vals.iter().format(" "))?;
             }
         }
     };
-
-    // match mode.as_str() {
-    //     "test" => {
-    //         let data = data::read_test(input)?;
-
-    //         let result = optim::optimize_multivariable(&data)?;
-    //         println!("{:?}", result);
-
-    //         let mut file = std::fs::File::create(output)?;
-    //         writeln!(file, "{} {}", result.0, result.1)?;
-    //     }
-    //     "optim" => {
-    //         let data = data::read_divergences(input)?;
-    //         let result = optim::optimize(&data)?;
-    //         println!("{:?}", result);
-
-    //         let mut file = std::fs::File::create(output)?;
-    //         writeln!(file, "{:?}", result)?;
-    //     }
-    //     "boot" => {
-    //         let rep: u64 = args[4].parse()?;
-    //         let data = data::bootstrap_divergences(input, Some(rep))?;
-    //         let result = optim::optimize(&data)?;
-    //         println!("{:?}", result);
-
-    //         let mut file = std::fs::File::create(output)?;
-    //         writeln!(file, "{:?}", result)?;
-    //     }
-
-    //     "varboot" => {
-    //         let rep: u64 = args[4].parse()?;
-    //         let rm: f64 = args[5].parse()?;
-    //         let om: f64 = args[6].parse()?;
-
-    //         let data = data::bootstrap_divergences(input, Some(rep))?;
-
-    //         let result = optim::optimize_variable(&data, rm, om)?;
-
-    //         println!("{:?}", result);
-
-    //         let mut file = std::fs::File::create(output)?;
-    //         writeln!(file, "{:?}", result)?;
-    //     }
-
-    //     "multiboot" => {
-    //         let rep: u64 = args[4].parse()?;
-    //         let data = data::bootstrap_divergences(input, Some(rep))?;
-
-    //         let result = optim::optimize_multivariable(&data)?;
-    //         println!("{:?}", result);
-
-    //         let mut file = std::fs::File::create(output)?;
-    //         writeln!(file, "{} {}", result.0, result.1)?;
-    //     }
-
-    //     _ => panic!("unsupported mode!"),
-    // }
 
     Ok(())
 }
@@ -202,6 +167,14 @@ enum Command {
             default_value_t = 231
         )]
         seed: u64,
+        #[arg(
+            short = 'p',
+            long,
+            value_name = "CHAINS",
+            help = "number of parallel chains",
+            default_value_t = 1
+        )]
+        chains: usize,
         #[arg(
             value_name = "STEPS",
             help = "number of warmup steps",

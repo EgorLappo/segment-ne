@@ -1,4 +1,4 @@
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{bail, Result, WrapErr};
 
 #[derive(Debug, Clone)]
 enum ParameterValue {
@@ -89,28 +89,6 @@ impl Parameters {
         let (n_rec, n_fit, n_anc) = split_params(&pop_sizes);
         let (t_rec, t_fit, t_anc) = split_params(&change_times);
 
-        if n_rec.len() != t_rec.len() {
-            bail!(
-                "got {:?} sizes but {:?} times for recent fixed parameters",
-                n_rec.len(),
-                t_rec.len()
-            );
-        }
-        if n_fit.len() != t_fit.len() {
-            bail!(
-                "got {:?} sizes but {:?} times for recent fixed parameters",
-                n_rec.len(),
-                t_rec.len()
-            );
-        }
-        if n_anc.len() != t_anc.len() {
-            bail!(
-                "got {:?} sizes but {:?} times for recent fixed parameters",
-                n_rec.len(),
-                t_rec.len()
-            );
-        }
-
         Ok(Self {
             n: ParameterList::new(&n_rec, &n_fit, &n_anc),
             t: ParameterList::new(&t_rec, &t_fit, &t_anc),
@@ -135,7 +113,9 @@ fn parse_params(param_str: &str) -> Result<Vec<ParameterValue>> {
                     ParameterValue::Fit(num)
                 }
             } else {
-                let num = x.parse()?;
+                let num = x
+                    .parse()
+                    .wrap_err_with(|| format!("cannot parse parameter: {}", x))?;
                 ParameterValue::Fixed(num)
             };
             Ok(param)
