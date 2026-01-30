@@ -41,24 +41,18 @@ impl ParameterList {
         self.fit = val.into();
     }
 
-    // TODO: impl Iterator/Iter?
-    pub fn substitute(&self, val: &[f64]) -> Box<[f64]> {
-        debug_assert!(val.len() == self.num_fit());
-
-        self.rec
-            .iter()
-            .copied()
-            .chain(val.iter().copied())
-            .chain(self.anc.iter().copied())
-            .collect()
-    }
-
     pub fn vec(&self) -> Box<[f64]> {
         self.rec
             .iter()
             .copied()
             .chain(self.fit.iter().copied())
             .chain(self.anc.iter().copied())
+            .collect()
+    }
+
+    pub fn substitute(&self, sub: &[f64]) -> Vec<f64> {
+        itertools::chain!(self.rec.iter(), sub.iter(), self.anc.iter())
+            .copied()
             .collect()
     }
 }

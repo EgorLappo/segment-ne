@@ -1,4 +1,4 @@
-use crate::{lik::k_lpdf, parameter::Parameters};
+use crate::{data::SegmentDivergence, parameter::Parameters};
 use color_eyre::eyre::Result;
 use ndarray::prelude::*;
 use scirs2_optimize::{
@@ -6,7 +6,7 @@ use scirs2_optimize::{
     unconstrained::{minimize_powell, Bounds, Options},
 };
 
-use crate::data::SegmentDivergence;
+mod lik;
 
 pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f64> {
     let ts = parameters.t.vec();
@@ -17,7 +17,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
             let mut total = 0.0;
 
             for sd in data.iter() {
-                total -= k_lpdf(sd.k, &ns, &ts, sd.mu);
+                total -= lik::k_lpdf(sd.k, &ns, &ts, sd.mu);
             }
 
             total
@@ -53,7 +53,7 @@ pub fn optimize_multivariable(
             let mut total = 0.0;
 
             for sd in data.iter() {
-                total -= k_lpdf(sd.k, &ns, &ts, sd.mu);
+                total -= lik::k_lpdf(sd.k, &ns, &ts, sd.mu);
             }
 
             total

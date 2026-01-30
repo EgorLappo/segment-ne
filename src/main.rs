@@ -1,13 +1,13 @@
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{bail, Result};
 use itertools::Itertools;
+use polars::prelude::*;
 use std::io::Write;
 use std::path::PathBuf;
 
 mod data;
-mod lik;
 mod mcmc;
-mod optim;
+mod optimize;
 mod parameter;
 
 fn main() -> Result<()> {
@@ -32,13 +32,13 @@ fn main() -> Result<()> {
 
             // see if the problem is single- or multi-variable
             if parameters.n.num_fit() == 1 {
-                let result = optim::optimize(&data, parameters)?;
+                let result = optimize::optimize(&data, parameters)?;
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
                 writeln!(file, "{:?}", result)?;
             } else {
-                let result = optim::optimize_multivariable(&data, parameters)?;
+                let result = optimize::optimize_multivariable(&data, parameters)?;
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
@@ -57,13 +57,13 @@ fn main() -> Result<()> {
 
             // see if the problem is single- or multi-variable
             if parameters.n.num_fit() == 1 {
-                let result = optim::optimize(&data, parameters)?;
+                let result = optimize::optimize(&data, parameters)?;
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
                 writeln!(file, "{:?}", result)?;
             } else {
-                let result = optim::optimize_multivariable(&data, parameters)?;
+                let result = optimize::optimize_multivariable(&data, parameters)?;
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
@@ -96,18 +96,39 @@ fn main() -> Result<()> {
                 })
                 .collect();
 
-            let mut samples = Vec::new();
+            let mut chain_dfs = Vec::new();
 
-            for h in handles.into_iter() {
+            for (i, h) in handles.into_iter().enumerate() {
                 let chain_samples = h.join().expect("could not join on a thread");
-                samples.extend_from_slice(&chain_samples);
+
+                let ll = Column::new("loglik".into(), chain_samples.0);
+
+                let n_samples: Vec<_> = chain_samples
+                    .1
+                    .into_iter()
+                    .map(|x| Series::new("nsamp".into(), x))
+                    .collect();
+                let n_samples = Column::new("n".into(), n_samples);
+
+                let t_samples: Vec<_> = chain_samples
+                    .2
+                    .into_iter()
+                    .map(|x| Series::new("tsamp".into(), x))
+                    .collect();
+                let t_samples = Column::new("t".into(), t_samples);
+
+                let chain_df = DataFrame::new(vec![ll, n_samples, t_samples])?;
+
+                let chain_df = chain_df.lazy().with_column(lit(i as u64).alias("chain"));
+                chain_dfs.push(chain_df);
             }
 
-            let mut file = std::fs::File::create(opts.output)?;
+            let mut df = concat(chain_dfs, UnionArgs::default())?.collect()?;
 
-            for (ll, step_vals) in samples.iter() {
-                writeln!(file, "{:?},{}", ll, step_vals.iter().format(" "))?;
-            }
+            let mut out_path = opts.output;
+            out_path.set_extension("parquet");
+            let out_file = std::fs::File::create_new(out_path)?;
+            ParquetWriter::new(out_file).finish(&mut df)?;
         }
     };
 

@@ -1,9 +1,16 @@
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use rand_distr::StandardNormal;
+use std::collections::VecDeque;
 
 use crate::data::SegmentDivergence;
 use crate::parameter::{ParameterList, Parameters};
+
+const ACC_RATE_LO: usize = 25;
+const ACC_RATE_HI: usize = 35;
+const SD_INIT: f64 = 25.;
+const SD_UPDATE_RATE: f64 = 0.05;
+const N_RECENT_STEPS: usize = 100;
 
 #[derive(Debug, Clone)]
 pub struct Chain {
@@ -12,8 +19,9 @@ pub struct Chain {
     pub obs: Vec<Observation>,
     pub loglik: f64,
     sd: f64, // std. dev. of the proposal
-    step_count: f64,
-    accept_count: f64,
+    step_count: usize,
+    // store recent
+    steps: VecDeque<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,13 +38,12 @@ impl Observation {
 
     pub fn lpdf(&self, n: &[f64], t: &[f64]) -> f64 {
         // draft: use full computation each time
-        crate::lik::k_lpdf(self.k, n, t, self.mu)
+        optimize::lik::k_lpdf(self.k, n, t, self.mu)
     }
 }
 
 impl Chain {
     pub fn new(data: &[SegmentDivergence], parameters: Parameters) -> Self {
-        // split pop sizes
         let n = parameters.n.clone();
         let t = parameters.t.clone();
 
@@ -44,14 +51,16 @@ impl Chain {
 
         let loglik = get_loglik(&obs, &n.vec(), &t.vec());
 
+        let steps = vec![0; N_RECENT_STEPS].into();
+
         Self {
             n,
             t,
             obs,
             loglik,
-            sd: 100.0,
-            step_count: 0.0,
-            accept_count: 0.0,
+            sd: SD_INIT,
+            step_count: 0,
+            steps,
         }
     }
 
@@ -61,13 +70,31 @@ impl Chain {
             .n
             .fit()
             .iter()
-            .zip(rng.sample_iter::<f64, StandardNormal>(StandardNormal))
+            .zip(rng.sample_iter::<f64, _>(StandardNormal))
             .map(|(n, x)| n + self.sd * x)
             .collect();
+        // let new_n = self.n.substitute(&new_nfit);
+        let new_n = Vec::new();
 
-        let new_n = self.n.substitute(&new_nfit);
-        // don't change for now
-        let new_t = self.t.vec();
+        // TODO: note that this is ill-defined right now
+        // because t has to be ordered
+        let new_tfit: Vec<f64> = self
+            .t
+            .fit()
+            .iter()
+            .zip(rng.sample_iter::<f64, _>(StandardNormal))
+            .map(|(t, x)| t + self.sd * x)
+            .collect();
+        // let new_t = self.t.substitute(&new_tfit);
+        let new_t = Vec::new();
+
+        // hack: return/reject immediately if times not ordered
+        if !new_t.is_sorted_by(|a, b| a < b) {
+            log::warn!("t proposal: not ordered, rejecting right away");
+            self.step_count += 1;
+            self.steps.pop_front();
+            self.steps.push_back(0);
+        }
 
         let new_loglik = get_loglik(&self.obs, &new_n, &new_t);
 
@@ -76,14 +103,36 @@ impl Chain {
         if rand::random::<f64>() <= log_ratio.exp() {
             // accept
             self.n.set_fit(&new_nfit);
+            self.t.set_fit(&new_tfit);
             // dont touch t
             self.loglik = new_loglik;
-            self.accept_count += 1.;
+
+            // log acceptance
+            self.steps.pop_front();
+            self.steps.push_back(1);
         } else {
             // reject
+            self.steps.pop_front();
+            self.steps.push_back(0);
         }
 
-        self.step_count += 1.;
+        self.step_count += 1;
+
+        // update acceptance rate to be ~30%
+        if (self.step_count > 500) && self.step_count.is_multiple_of(25) {
+            let acc_rate = self.steps.iter().sum::<u8>() as usize;
+            log::debug!(
+                "step {}: acceptance rate {:.02}, sd {:.02}",
+                self.step_count as usize,
+                acc_rate,
+                self.sd
+            );
+            if acc_rate > ACC_RATE_HI {
+                self.sd *= 1. + SD_UPDATE_RATE;
+            } else if acc_rate < ACC_RATE_LO {
+                self.sd *= 1. - SD_UPDATE_RATE;
+            }
+        }
     }
 
     pub fn run(
@@ -92,8 +141,11 @@ impl Chain {
         sampling: usize,
         seed: u64,
         bar: MultiProgress,
-    ) -> Vec<(f64, Box<[f64]>)> {
-        let mut samples = Vec::with_capacity(sampling);
+    ) -> (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>) {
+        let mut lls = Vec::with_capacity(sampling);
+        let mut n_samples = Vec::with_capacity(sampling);
+        let mut t_samples = Vec::with_capacity(sampling);
+
         let mut rng = SmallRng::seed_from_u64(seed);
 
         let pb = bar.add(ProgressBar::new((warmup + sampling) as u64));
@@ -113,14 +165,17 @@ impl Chain {
         pb.set_prefix("sampling");
         for _ in 0..sampling {
             self.step(&mut rng);
-            samples.push((self.loglik, self.n.fit().into()));
+
+            lls.push(self.loglik);
+            n_samples.push(self.n.fit().into());
+            t_samples.push(self.t.fit().into());
 
             pb.inc(1);
         }
 
         pb.finish();
 
-        samples
+        (lls, n_samples, t_samples)
     }
 }
 
