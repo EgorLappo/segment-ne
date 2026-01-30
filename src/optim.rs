@@ -3,16 +3,16 @@ use color_eyre::eyre::Result;
 use ndarray::prelude::*;
 use scirs2_optimize::{
     minimize_scalar,
-    unconstrained::{minimize_powell, Bounds, Options},
+    unconstrained::{Bounds, Options, minimize_powell},
 };
 
-mod lik;
+pub mod lik;
 
 pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f64> {
     let ts = parameters.t.vec();
     let result = minimize_scalar(
         |n| {
-            let ns = parameters.n.substitute(&[n]);
+            let ns = parameters.n.substitute(std::slice::from_ref(&n));
 
             let mut total = 0.0;
 

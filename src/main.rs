@@ -1,16 +1,29 @@
 use clap::{Parser, Subcommand};
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::Result;
 use itertools::Itertools;
 use polars::prelude::*;
 use std::io::Write;
 use std::path::PathBuf;
 
+use crate::mcmc::Observation;
+
 mod data;
 mod mcmc;
-mod optimize;
+mod optim;
 mod parameter;
 
 fn main() -> Result<()> {
+    // debug code
+    let ns = vec![10000., 1250., 3400., 18500., 10000.];
+    let ts = vec![0., 1800., 5000., 18965., 100000.];
+    let k = 3.;
+    let mu = 1e-4;
+
+    let obs = Observation::new(k, mu);
+
+    println!("new: {}", obs.lpdf(ns.iter(), ts.iter()));
+    println!("old: {}", optim::lik::k_lpdf(k, &ns, &ts, mu));
+
     let logger =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).build();
     color_eyre::install()?;
@@ -32,13 +45,13 @@ fn main() -> Result<()> {
 
             // see if the problem is single- or multi-variable
             if parameters.n.num_fit() == 1 {
-                let result = optimize::optimize(&data, parameters)?;
+                let result = optim::optimize(&data, parameters)?;
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
                 writeln!(file, "{:?}", result)?;
             } else {
-                let result = optimize::optimize_multivariable(&data, parameters)?;
+                let result = optim::optimize_multivariable(&data, parameters)?;
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
@@ -57,13 +70,13 @@ fn main() -> Result<()> {
 
             // see if the problem is single- or multi-variable
             if parameters.n.num_fit() == 1 {
-                let result = optimize::optimize(&data, parameters)?;
+                let result = optim::optimize(&data, parameters)?;
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;
                 writeln!(file, "{:?}", result)?;
             } else {
-                let result = optimize::optimize_multivariable(&data, parameters)?;
+                let result = optim::optimize_multivariable(&data, parameters)?;
                 println!("{:?}", result);
 
                 let mut file = std::fs::File::create(opts.output)?;

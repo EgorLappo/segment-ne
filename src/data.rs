@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use color_eyre::eyre::{eyre, Result, WrapErr};
+use color_eyre::eyre::Result;
 use polars::prelude::*;
 
 const MU: f64 = 1.2e-8;

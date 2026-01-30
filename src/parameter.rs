@@ -1,4 +1,4 @@
-use color_eyre::eyre::{bail, Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, bail};
 
 #[derive(Debug, Clone)]
 enum ParameterValue {
@@ -29,6 +29,7 @@ impl ParameterList {
     pub fn len(&self) -> usize {
         self.rec.len() + self.fit.len() + self.anc.len()
     }
+
     pub fn num_fit(&self) -> usize {
         self.fit.len()
     }
@@ -41,6 +42,7 @@ impl ParameterList {
         self.fit = val.into();
     }
 
+    // helpers for "uncached computation"
     pub fn vec(&self) -> Box<[f64]> {
         self.rec
             .iter()
@@ -54,6 +56,12 @@ impl ParameterList {
         itertools::chain!(self.rec.iter(), sub.iter(), self.anc.iter())
             .copied()
             .collect()
+    }
+
+    // helpers for cached computation
+    pub fn fit_idx(&self) -> Vec<usize> {
+        let init = self.rec.len();
+        (init..(init + self.fit.len())).collect()
     }
 }
 
@@ -70,7 +78,9 @@ impl Parameters {
 
         // validate parameter lengths
         if change_times.len() + 1 == pop_sizes.len() {
-            log::warn!("number of time parameters is one less than the number of size parameters. assuming you did not include time zero");
+            log::warn!(
+                "number of time parameters is one less than the number of size parameters. assuming you did not include time zero"
+            );
             change_times.insert(0, ParameterValue::Fixed(0.));
         } else if change_times.len() != pop_sizes.len() {
             bail!(

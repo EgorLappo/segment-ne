@@ -1,10 +1,14 @@
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use itertools::Itertools;
+use logsumexp::LogSumExp;
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rand_distr::StandardNormal;
 use std::collections::VecDeque;
 
 use crate::data::SegmentDivergence;
 use crate::parameter::{ParameterList, Parameters};
+
+mod lik;
 
 const ACC_RATE_LO: usize = 25;
 const ACC_RATE_HI: usize = 35;
@@ -33,12 +37,45 @@ pub struct Observation {
 
 impl Observation {
     pub fn new(k: f64, mu: f64) -> Self {
+        // init cache
+
         Self { k, mu }
     }
 
-    pub fn lpdf(&self, n: &[f64], t: &[f64]) -> f64 {
+    pub fn lpdf<'a, I: Iterator<Item = &'a f64>>(&'a self, n: I, t: I) -> f64 {
         // draft: use full computation each time
-        optimize::lik::k_lpdf(self.k, n, t, self.mu)
+
+        let mut ans: f64 = 0.0;
+        let mut total: Vec<f64> = Vec::with_capacity(10);
+
+        let t_pairs = t.map(Some).chain(std::iter::once(None)).tuple_windows();
+
+        for ((ot_start, ot_end), &pop_size) in t_pairs.zip(n) {
+            match (ot_start, ot_end) {
+                (Some(&segment_start), Some(&segment_end)) => {
+                    let segment_length = segment_end - segment_start;
+
+                    let term = lik::log_intergral_exact(
+                        self.k,
+                        segment_start,
+                        segment_end,
+                        pop_size,
+                        self.mu,
+                    );
+                    total.push(term + ans);
+
+                    ans += -segment_length / (2. * pop_size);
+                }
+                (Some(&segment_start), None) => {
+                    let term =
+                        lik::log_integral_exact_inf(self.k, segment_start, pop_size, self.mu);
+                    total.push(term + ans);
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        total.iter().ln_sum_exp()
     }
 }
 
@@ -49,7 +86,10 @@ impl Chain {
 
         let obs: Vec<Observation> = data.iter().map(|s| Observation::new(s.k, s.mu)).collect();
 
-        let loglik = get_loglik(&obs, &n.vec(), &t.vec());
+        let loglik = obs
+            .iter()
+            .map(|o| o.lpdf(n.vec().iter(), t.vec().iter()))
+            .sum();
 
         let steps = vec![0; N_RECENT_STEPS].into();
 
@@ -73,8 +113,7 @@ impl Chain {
             .zip(rng.sample_iter::<f64, _>(StandardNormal))
             .map(|(n, x)| n + self.sd * x)
             .collect();
-        // let new_n = self.n.substitute(&new_nfit);
-        let new_n = Vec::new();
+        let new_n = self.n.substitute(&new_nfit);
 
         // TODO: note that this is ill-defined right now
         // because t has to be ordered
@@ -85,8 +124,7 @@ impl Chain {
             .zip(rng.sample_iter::<f64, _>(StandardNormal))
             .map(|(t, x)| t + self.sd * x)
             .collect();
-        // let new_t = self.t.substitute(&new_tfit);
-        let new_t = Vec::new();
+        let new_t = self.t.substitute(&new_tfit);
 
         // hack: return/reject immediately if times not ordered
         if !new_t.is_sorted_by(|a, b| a < b) {
@@ -96,9 +134,13 @@ impl Chain {
             self.steps.push_back(0);
         }
 
-        let new_loglik = get_loglik(&self.obs, &new_n, &new_t);
+        let new_loglik = self
+            .obs
+            .iter()
+            .map(|o| o.lpdf(new_n.iter(), new_t.iter()))
+            .sum();
 
-        let log_ratio = new_loglik - self.loglik;
+        let log_ratio: f64 = new_loglik - self.loglik;
 
         if rand::random::<f64>() <= log_ratio.exp() {
             // accept
@@ -123,7 +165,7 @@ impl Chain {
             let acc_rate = self.steps.iter().sum::<u8>() as usize;
             log::debug!(
                 "step {}: acceptance rate {:.02}, sd {:.02}",
-                self.step_count as usize,
+                self.step_count,
                 acc_rate,
                 self.sd
             );
@@ -179,9 +221,9 @@ impl Chain {
     }
 }
 
-fn get_loglik(obs: &[Observation], n: &[f64], t: &[f64]) -> f64 {
-    obs.iter().map(|o| o.lpdf(n, t)).sum()
-}
+// fn get_loglik(obs: &[Observation], n: &[f64], t: &[f64]) -> f64 {
+//     obs.iter().map(|o| o.lpdf(n, t)).sum()
+// }
 
 // outline
 // 1. initialize to store data and parameters
