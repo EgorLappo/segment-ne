@@ -5,25 +5,13 @@ use polars::prelude::*;
 use std::io::Write;
 use std::path::PathBuf;
 
-use crate::mcmc::Observation;
-
 mod data;
+mod lik;
 mod mcmc;
 mod optim;
 mod parameter;
 
 fn main() -> Result<()> {
-    // debug code
-    let ns = vec![10000., 1250., 3400., 18500., 10000.];
-    let ts = vec![0., 1800., 5000., 18965., 100000.];
-    let k = 3.;
-    let mu = 1e-4;
-
-    let obs = Observation::new(k, mu);
-
-    println!("new: {}", obs.lpdf(ns.iter(), ts.iter()));
-    println!("old: {}", optim::lik::k_lpdf(k, &ns, &ts, mu));
-
     let logger =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).build();
     color_eyre::install()?;
@@ -140,7 +128,7 @@ fn main() -> Result<()> {
 
             let mut out_path = opts.output;
             out_path.set_extension("parquet");
-            let out_file = std::fs::File::create_new(out_path)?;
+            let out_file = std::fs::File::create(out_path)?;
             ParquetWriter::new(out_file).finish(&mut df)?;
         }
     };

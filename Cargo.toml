@@ -21,12 +21,9 @@ polars = { version = "0.52.0", features = [
 ] }
 rand = { version = "0.9.2", features = ["small_rng"] }
 rand_distr = "0.5.1"
+rayon = "1.11.0"
 scirs2-optimize = "0.1.0-rc.2"
 xsf = "0.3.6"
 
 [dev-dependencies]
 criterion = "0.8"
-
-[[bench]]
-name = "sampling"
-harness = false

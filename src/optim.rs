@@ -1,12 +1,10 @@
-use crate::{data::SegmentDivergence, parameter::Parameters};
+use crate::{data::SegmentDivergence, lik, parameter::Parameters};
 use color_eyre::eyre::Result;
 use ndarray::prelude::*;
 use scirs2_optimize::{
     minimize_scalar,
     unconstrained::{Bounds, Options, minimize_powell},
 };
-
-pub mod lik;
 
 pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f64> {
     let ts = parameters.t.vec();

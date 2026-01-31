@@ -1,18 +1,20 @@
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use itertools::Itertools;
 use logsumexp::LogSumExp;
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rand_distr::StandardNormal;
+use rayon::prelude::*;
 use std::collections::VecDeque;
 
 use crate::data::SegmentDivergence;
-use crate::parameter::{ParameterList, Parameters};
+use crate::parameter::{
+    ParamTuples, ParameterList, Parameters, get_should_cache, get_tuples, get_tuples_sub,
+};
 
-mod lik;
+use crate::lik;
 
 const ACC_RATE_LO: usize = 25;
 const ACC_RATE_HI: usize = 35;
-const SD_INIT: f64 = 25.;
+const SD_INIT: f64 = 10.;
 const SD_UPDATE_RATE: f64 = 0.05;
 const N_RECENT_STEPS: usize = 100;
 
@@ -33,42 +35,75 @@ pub struct Observation {
     pub k: f64,
     pub mu: f64,
     // term cache goes here
+    term_cache: Vec<Option<f64>>,
 }
 
 impl Observation {
-    pub fn new(k: f64, mu: f64) -> Self {
+    pub fn new(k: f64, mu: f64, n: &ParameterList, t: &ParameterList) -> Self {
         // init cache
+        let mut term_cache = Vec::new();
 
-        Self { k, mu }
+        let param_tuples = get_tuples(n, t);
+        let should_cache = get_should_cache(n, t);
+
+        for (((ot_start, ot_end), pop_size), do_cache) in
+            param_tuples.iter().zip(should_cache.iter())
+        {
+            if *do_cache {
+                match (&ot_start, &ot_end) {
+                    (Some(segment_start), Some(segment_end)) => {
+                        let term = lik::log_intergral_exact(
+                            k,
+                            *segment_start,
+                            *segment_end,
+                            *pop_size,
+                            mu,
+                        );
+
+                        term_cache.push(Some(term));
+                    }
+                    (Some(segment_start), None) => {
+                        let term = lik::log_integral_exact_inf(k, *segment_start, *pop_size, mu);
+                        term_cache.push(Some(term));
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                term_cache.push(None);
+            }
+        }
+
+        Self { k, mu, term_cache }
     }
 
-    pub fn lpdf<'a, I: Iterator<Item = &'a f64>>(&'a self, n: I, t: I) -> f64 {
+    pub fn lpdf(&self, p: &ParamTuples) -> f64 {
         // draft: use full computation each time
 
         let mut ans: f64 = 0.0;
         let mut total: Vec<f64> = Vec::with_capacity(10);
 
-        let t_pairs = t.map(Some).chain(std::iter::once(None)).tuple_windows();
-
-        for ((ot_start, ot_end), &pop_size) in t_pairs.zip(n) {
-            match (ot_start, ot_end) {
-                (Some(&segment_start), Some(&segment_end)) => {
+        for (((ot_start, ot_end), pop_size), cache) in p.iter().zip(self.term_cache.iter()) {
+            match (&ot_start, &ot_end) {
+                (Some(segment_start), Some(segment_end)) => {
                     let segment_length = segment_end - segment_start;
 
-                    let term = lik::log_intergral_exact(
-                        self.k,
-                        segment_start,
-                        segment_end,
-                        pop_size,
-                        self.mu,
-                    );
+                    let term = cache.unwrap_or_else(|| {
+                        lik::log_intergral_exact(
+                            self.k,
+                            *segment_start,
+                            *segment_end,
+                            *pop_size,
+                            self.mu,
+                        )
+                    });
+
                     total.push(term + ans);
 
                     ans += -segment_length / (2. * pop_size);
                 }
-                (Some(&segment_start), None) => {
+                (Some(segment_start), None) => {
                     let term =
-                        lik::log_integral_exact_inf(self.k, segment_start, pop_size, self.mu);
+                        lik::log_integral_exact_inf(self.k, *segment_start, *pop_size, self.mu);
                     total.push(term + ans);
                 }
                 _ => unreachable!(),
@@ -84,12 +119,14 @@ impl Chain {
         let n = parameters.n.clone();
         let t = parameters.t.clone();
 
-        let obs: Vec<Observation> = data.iter().map(|s| Observation::new(s.k, s.mu)).collect();
-
-        let loglik = obs
+        let obs: Vec<Observation> = data
             .iter()
-            .map(|o| o.lpdf(n.vec().iter(), t.vec().iter()))
-            .sum();
+            .map(|s| Observation::new(s.k, s.mu, &n, &t))
+            .collect();
+
+        let param_tuples = get_tuples(&n, &t);
+
+        let loglik = obs.iter().map(|o| o.lpdf(&param_tuples)).sum();
 
         let steps = vec![0; N_RECENT_STEPS].into();
 
@@ -113,7 +150,6 @@ impl Chain {
             .zip(rng.sample_iter::<f64, _>(StandardNormal))
             .map(|(n, x)| n + self.sd * x)
             .collect();
-        let new_n = self.n.substitute(&new_nfit);
 
         // TODO: note that this is ill-defined right now
         // because t has to be ordered
@@ -124,23 +160,43 @@ impl Chain {
             .zip(rng.sample_iter::<f64, _>(StandardNormal))
             .map(|(t, x)| t + self.sd * x)
             .collect();
-        let new_t = self.t.substitute(&new_tfit);
+
+        let new_param_tuples = get_tuples_sub(&self.n, &self.t, &new_nfit, &new_tfit);
 
         // hack: return/reject immediately if times not ordered
-        if !new_t.is_sorted_by(|a, b| a < b) {
+        if !new_param_tuples
+            .iter()
+            .map(|x| x.0.0.unwrap())
+            .is_sorted_by(|a, b| a < b)
+        {
             log::warn!("t proposal: not ordered, rejecting right away");
             self.step_count += 1;
             self.steps.pop_front();
             self.steps.push_back(0);
         }
 
-        let new_loglik = self
-            .obs
-            .iter()
-            .map(|o| o.lpdf(new_n.iter(), new_t.iter()))
-            .sum();
+        let new_loglik = self.obs.par_iter().map(|o| o.lpdf(&new_param_tuples)).sum();
 
         let log_ratio: f64 = new_loglik - self.loglik;
+
+        log::debug!(
+            "step {}: n: {:?} -> {:?}",
+            self.step_count,
+            self.n.fit(),
+            new_nfit
+        );
+        log::debug!(
+            "step {}: t: {:?} -> {:?}",
+            self.step_count,
+            self.t.fit(),
+            new_tfit
+        );
+        log::debug!(
+            "step {}: ll: {} -> {}",
+            self.step_count,
+            self.loglik,
+            new_loglik
+        );
 
         if rand::random::<f64>() <= log_ratio.exp() {
             // accept
@@ -152,10 +208,14 @@ impl Chain {
             // log acceptance
             self.steps.pop_front();
             self.steps.push_back(1);
+
+            log::debug!("step {}: accepting", self.step_count);
         } else {
             // reject
             self.steps.pop_front();
             self.steps.push_back(0);
+
+            log::debug!("step {}: rejecting", self.step_count);
         }
 
         self.step_count += 1;

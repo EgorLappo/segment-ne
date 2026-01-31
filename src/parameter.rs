@@ -1,16 +1,11 @@
 use color_eyre::eyre::{Result, WrapErr, bail};
-
-#[derive(Debug, Clone)]
-enum ParameterValue {
-    Fit(f64),
-    Fixed(f64),
-}
+use itertools::Itertools;
 
 #[derive(Debug, Clone)]
 pub struct ParameterList {
-    rec: Box<[f64]>,
-    fit: Box<[f64]>,
-    anc: Box<[f64]>,
+    pub rec: Box<[f64]>,
+    pub fit: Box<[f64]>,
+    pub anc: Box<[f64]>,
 }
 
 impl ParameterList {
@@ -24,10 +19,6 @@ impl ParameterList {
 
     pub fn init_values(&self) -> &[f64] {
         &self.fit
-    }
-
-    pub fn len(&self) -> usize {
-        self.rec.len() + self.fit.len() + self.anc.len()
     }
 
     pub fn num_fit(&self) -> usize {
@@ -57,18 +48,67 @@ impl ParameterList {
             .copied()
             .collect()
     }
+}
 
-    // helpers for cached computation
-    pub fn fit_idx(&self) -> Vec<usize> {
-        let init = self.rec.len();
-        (init..(init + self.fit.len())).collect()
-    }
+pub type ParamTuples = Box<[((Option<f64>, Option<f64>), f64)]>;
+
+pub fn get_tuples(n: &ParameterList, t: &ParameterList) -> ParamTuples {
+    let ti = itertools::chain!(t.rec.iter(), t.fit.iter(), t.anc.iter()).copied();
+    let ni = itertools::chain!(n.rec.iter(), n.fit.iter(), n.anc.iter()).copied();
+
+    ti.map(Some)
+        .chain(std::iter::once(None))
+        .tuple_windows::<(Option<f64>, Option<f64>)>()
+        .zip(ni)
+        .collect()
+}
+
+pub fn get_tuples_sub(
+    n: &ParameterList,
+    t: &ParameterList,
+    n_sub: &[f64],
+    t_sub: &[f64],
+) -> ParamTuples {
+    let ti = itertools::chain!(t.rec.iter(), t_sub.iter(), t.anc.iter()).copied();
+    let ni = itertools::chain!(n.rec.iter(), n_sub.iter(), n.anc.iter()).copied();
+
+    ti.map(Some)
+        .chain(std::iter::once(None))
+        .tuple_windows::<(Option<f64>, Option<f64>)>()
+        .zip(ni)
+        .collect()
+}
+
+pub fn get_should_cache(n: &ParameterList, t: &ParameterList) -> Vec<bool> {
+    let ni = itertools::chain!(
+        n.rec.iter().map(|_| false),
+        n.fit.iter().map(|_| true),
+        n.anc.iter().map(|_| false)
+    );
+    let ti = itertools::chain!(
+        t.rec.iter().map(|_| false),
+        t.fit.iter().map(|_| true),
+        t.anc.iter().map(|_| false)
+    );
+
+    ti.map(Some)
+        .chain(std::iter::once(None))
+        .tuple_windows()
+        .zip(ni)
+        .map(|((x, y), z)| !(x.unwrap_or(false) || y.unwrap_or(false) || z))
+        .collect()
 }
 
 #[derive(Debug, Clone)]
 pub struct Parameters {
     pub n: ParameterList,
     pub t: ParameterList,
+}
+
+#[derive(Debug, Clone)]
+enum ParameterValue {
+    Fit(f64),
+    Fixed(f64),
 }
 
 impl Parameters {
