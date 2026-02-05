@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, bail};
 use itertools::Itertools;
 use polars::prelude::*;
 use std::io::Write;
@@ -8,6 +8,7 @@ use std::path::PathBuf;
 mod data;
 mod lik;
 mod mcmc;
+mod observation;
 mod optim;
 mod parameter;
 
@@ -22,17 +23,16 @@ fn main() -> Result<()> {
 
     match opts.command {
         Command::Optim => {
+            let total_fit_params = parameters.t.num_fit() + parameters.n.num_fit();
             // optimization only works with variable population size (s)
-            if !parameters.t.num_fit() > 0 {
-                log::warn!(
-                    "optimizing time variables is not yet supported, will use them as fixed"
-                );
+            if total_fit_params == 0 {
+                bail!("no parameters to be fit were provided. please annotate them with '~'")
             }
 
             let data = data::read_divergences(opts.input)?;
 
             // see if the problem is single- or multi-variable
-            if parameters.n.num_fit() == 1 {
+            if total_fit_params == 1 {
                 let result = optim::optimize(&data, parameters)?;
                 println!("{:?}", result);
 

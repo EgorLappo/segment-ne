@@ -32,22 +32,6 @@ impl ParameterList {
     pub fn set_fit(&mut self, val: &[f64]) {
         self.fit = val.into();
     }
-
-    // helpers for "uncached computation"
-    pub fn vec(&self) -> Box<[f64]> {
-        self.rec
-            .iter()
-            .copied()
-            .chain(self.fit.iter().copied())
-            .chain(self.anc.iter().copied())
-            .collect()
-    }
-
-    pub fn substitute(&self, sub: &[f64]) -> Vec<f64> {
-        itertools::chain!(self.rec.iter(), sub.iter(), self.anc.iter())
-            .copied()
-            .collect()
-    }
 }
 
 pub type ParamTuples = Box<[((Option<f64>, Option<f64>), f64)]>;

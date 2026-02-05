@@ -66,7 +66,7 @@ pub fn log_neg_antiderivative(k: f64, t: f64, segment_start: f64, n: f64, mu: f6
         + k * (2. * mu * t).ln()
         + xsf::gammaincc(1. + k, (2. * mu + 0.5 / n) * t).ln();
 
-    ans -= (k + 1.) * ((2. * mu + 0.5 / n) * t).ln() - (2. * n).ln();
+    ans = ans - (k + 1.) * ((2. * mu + 0.5 / n) * t).ln() - (2. * n).ln();
 
     ans
 }
