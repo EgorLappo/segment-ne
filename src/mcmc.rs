@@ -35,7 +35,7 @@ impl Chain {
 
         let obs: Vec<Observation> = data
             .iter()
-            .map(|s| Observation::new(s.k, s.mu, &n, &t))
+            .map(|s| Observation::new(s.k, s.mu, &n, &t, parameters.adm_p, parameters.adm_idx))
             .collect();
 
         let param_tuples = get_tuples(&n, &t);
@@ -91,6 +91,9 @@ impl Chain {
 
         let new_loglik = self.obs.par_iter().map(|o| o.lpdf(&new_param_tuples)).sum();
 
+        // NOTE to future self:
+        //  we use *symmetric* gaussian proposal
+        //  so we don't have to add proposal distribution density terms here
         let log_ratio: f64 = new_loglik - self.loglik;
 
         log::debug!(
@@ -116,7 +119,7 @@ impl Chain {
             // accept
             self.n.set_fit(&new_nfit);
             self.t.set_fit(&new_tfit);
-            // dont touch t
+
             self.loglik = new_loglik;
 
             // log acceptance
@@ -135,7 +138,7 @@ impl Chain {
         self.step_count += 1;
 
         // update acceptance rate to be ~30%
-        if (self.step_count > 500) && self.step_count.is_multiple_of(25) {
+        if (self.step_count > 500) && self.step_count.is_multiple_of(100) {
             let acc_rate = self.steps.iter().sum::<u8>() as usize;
             log::debug!(
                 "step {}: acceptance rate {:.02}, sd {:.02}",
@@ -148,6 +151,9 @@ impl Chain {
             } else if acc_rate < ACC_RATE_LO {
                 self.sd *= 1. - SD_UPDATE_RATE;
             }
+
+            self.sd = self.sd.min(100.);
+            self.sd = self.sd.max(5.);
         }
     }
 

@@ -19,7 +19,12 @@ fn main() -> Result<()> {
     let opts = Opts::parse();
 
     // parameter validation
-    let parameters = crate::parameter::Parameters::new(&opts.pop_sizes, &opts.change_times)?;
+    let parameters = crate::parameter::Parameters::new(
+        &opts.pop_sizes,
+        &opts.change_times,
+        opts.admixture_fraction,
+        opts.admixture_index,
+    )?;
 
     match opts.command {
         Command::Optim => {
@@ -149,6 +154,22 @@ struct Opts {
         help = "output file"
     )]
     output: PathBuf,
+    #[arg(
+        short = 'a',
+        long = "admixture_fraction",
+        value_name = "FRAC",
+        default_value_t = 1.0,
+        help = "Admixture fraction from the target population"
+    )]
+    admixture_fraction: f64,
+    #[arg(
+        short = 'l',
+        long = "admixture_segment",
+        value_name = "INDEX",
+        default_value_t = 1,
+        help = "index of breakpoint at which admixture happens (1-based; l=m means admixture after the mth constant segment"
+    )]
+    admixture_index: usize,
     #[arg(
         short = 'n',
         long = "sizes",

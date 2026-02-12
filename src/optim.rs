@@ -14,7 +14,16 @@ use scirs2_optimize::{
 pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f64> {
     let obs: Vec<Observation> = data
         .iter()
-        .map(|s| Observation::new(s.k, s.mu, &parameters.n, &parameters.t))
+        .map(|s| {
+            Observation::new(
+                s.k,
+                s.mu,
+                &parameters.n,
+                &parameters.t,
+                parameters.adm_p,
+                parameters.adm_idx,
+            )
+        })
         .collect();
 
     let result = if parameters.n.num_fit() == 1 {
@@ -79,7 +88,16 @@ pub fn optimize_multivariable(
 
     let obs: Vec<Observation> = data
         .iter()
-        .map(|s| Observation::new(s.k, s.mu, &parameters.n, &parameters.t))
+        .map(|s| {
+            Observation::new(
+                s.k,
+                s.mu,
+                &parameters.n,
+                &parameters.t,
+                parameters.adm_p,
+                parameters.adm_idx,
+            )
+        })
         .collect();
 
     let result = minimize_powell(

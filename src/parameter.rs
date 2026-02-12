@@ -87,6 +87,8 @@ pub fn get_should_cache(n: &ParameterList, t: &ParameterList) -> Vec<bool> {
 pub struct Parameters {
     pub n: ParameterList,
     pub t: ParameterList,
+    pub adm_p: f64,
+    pub adm_idx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -96,7 +98,12 @@ enum ParameterValue {
 }
 
 impl Parameters {
-    pub fn new(size_str: &str, time_str: &str) -> Result<Self> {
+    pub fn new(
+        size_str: &str,
+        time_str: &str,
+        admixture_fraction: f64,
+        admixture_index: usize,
+    ) -> Result<Self> {
         let pop_sizes = parse_params(size_str)?;
         let mut change_times = parse_params(time_str)?;
 
@@ -114,12 +121,29 @@ impl Parameters {
             );
         }
 
+        if admixture_fraction <= 0. || admixture_fraction > 1.0 {
+            bail!(
+                "provided invalid admixture fraction {}. it must lie in (0, 1]",
+                admixture_fraction
+            )
+        }
+
+        if admixture_index == 0 || admixture_index >= pop_sizes.len() {
+            bail!(
+                "provided invalid admixture index {}. it must lie between provided constant population size segments",
+                admixture_index
+            )
+        }
+
         let (n_rec, n_fit, n_anc) = split_params(&pop_sizes);
         let (t_rec, t_fit, t_anc) = split_params(&change_times);
 
         Ok(Self {
             n: ParameterList::new(&n_rec, &n_fit, &n_anc),
             t: ParameterList::new(&t_rec, &t_fit, &t_anc),
+            adm_p: admixture_fraction,
+            // NOTE: let users have 1-based, and we will use 0-based
+            adm_idx: admixture_index - 1,
         })
     }
 }
