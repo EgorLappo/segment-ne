@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 use itertools::Itertools;
 use polars::prelude::*;
 use std::io::Write;
@@ -34,35 +34,14 @@ fn main() -> Result<()> {
                 bail!("no parameters to be fit were provided. please annotate them with '~'")
             }
 
-            let data = data::read_divergences(opts.input)?;
+            let data = if let Some(boot) = opts.boot {
+                data::bootstrap_divergences(opts.input, boot)?
+            } else {
+                data::read_divergences(opts.input)?
+            };
 
             // see if the problem is single- or multi-variable
             if total_fit_params == 1 {
-                let result = optim::optimize(&data, parameters)?;
-                println!("{:?}", result);
-
-                let mut file = std::fs::File::create(opts.output)?;
-                writeln!(file, "{:?}", result)?;
-            } else {
-                let result = optim::optimize_multivariable(&data, parameters)?;
-                println!("{:?}", result);
-
-                let mut file = std::fs::File::create(opts.output)?;
-                writeln!(file, "{:?}", result.iter().format(" "))?;
-            }
-        }
-        Command::Boot { seed } => {
-            // optimization only works with variable population size (s)
-            if !parameters.t.num_fit() > 0 {
-                log::warn!(
-                    "optimizing time variables is not yet supported, will use them as fixed"
-                );
-            }
-
-            let data = data::bootstrap_divergences(opts.input, seed)?;
-
-            // see if the problem is single- or multi-variable
-            if parameters.n.num_fit() == 1 {
                 let result = optim::optimize(&data, parameters)?;
                 println!("{:?}", result);
 
@@ -87,7 +66,11 @@ fn main() -> Result<()> {
             let bar = indicatif::MultiProgress::new();
             indicatif_log_bridge::LogWrapper::new(bar.clone(), logger).try_init()?;
 
-            let data = data::read_divergences(opts.input)?;
+            let data = if let Some(boot) = opts.boot {
+                data::bootstrap_divergences(opts.input, boot)?
+            } else {
+                data::read_divergences(opts.input)?
+            };
 
             let handles: Vec<_> = (0..chains)
                 .map(|_| {
@@ -184,6 +167,13 @@ struct Opts {
         help = "population size change times"
     )]
     change_times: String,
+    #[arg(
+        short,
+        long,
+        value_name = "SEED",
+        help = "pass a seed to bootstrap the rows of the input table"
+    )]
+    boot: Option<u64>,
     #[command(subcommand)]
     command: Command,
 }
@@ -191,16 +181,6 @@ struct Opts {
 #[derive(Debug, Clone, Subcommand)]
 enum Command {
     Optim,
-    Boot {
-        #[arg(
-            short,
-            long,
-            value_name = "SEED",
-            help = "random_seed",
-            default_value_t = 231
-        )]
-        seed: u64,
-    },
     Sample {
         #[arg(
             short,
