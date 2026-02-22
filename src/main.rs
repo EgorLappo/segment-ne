@@ -11,6 +11,7 @@ mod mcmc;
 mod observation;
 mod optim;
 mod parameter;
+mod skyline;
 
 fn main() -> Result<()> {
     let logger =
@@ -26,6 +27,12 @@ fn main() -> Result<()> {
         opts.admixture_index,
     )?;
 
+    let data = if let Some(boot) = opts.boot {
+        data::bootstrap_divergences(opts.input, opts.fast, boot)?
+    } else {
+        data::read_divergences(opts.input, opts.fast)?
+    };
+
     match opts.command {
         Command::Optim => {
             let total_fit_params = parameters.t.num_fit() + parameters.n.num_fit();
@@ -33,12 +40,6 @@ fn main() -> Result<()> {
             if total_fit_params == 0 {
                 bail!("no parameters to be fit were provided. please annotate them with '~'")
             }
-
-            let data = if let Some(boot) = opts.boot {
-                data::bootstrap_divergences(opts.input, boot)?
-            } else {
-                data::read_divergences(opts.input)?
-            };
 
             // see if the problem is single- or multi-variable
             if total_fit_params == 1 {
@@ -66,12 +67,6 @@ fn main() -> Result<()> {
             let bar = indicatif::MultiProgress::new();
             indicatif_log_bridge::LogWrapper::new(bar.clone(), logger).try_init()?;
 
-            let data = if let Some(boot) = opts.boot {
-                data::bootstrap_divergences(opts.input, boot)?
-            } else {
-                data::read_divergences(opts.input)?
-            };
-
             let handles: Vec<_> = (0..chains)
                 .map(|_| {
                     let data = data.clone();
@@ -79,6 +74,78 @@ fn main() -> Result<()> {
                     let bar = bar.clone();
                     std::thread::spawn(move || {
                         let mut chain = Chain::new(&data, parameters);
+
+                        chain.run(warmup, sampling, seed, bar)
+                    })
+                })
+                .collect();
+
+            let mut chain_dfs = Vec::new();
+
+            for (i, h) in handles.into_iter().enumerate() {
+                let chain_samples = h.join().expect("could not join on a thread");
+
+                let ll = Column::new("loglik".into(), chain_samples.0);
+
+                let n_samples: Vec<_> = chain_samples
+                    .1
+                    .into_iter()
+                    .map(|x| Series::new("nsamp".into(), x))
+                    .collect();
+                let n_samples = Column::new("n".into(), n_samples);
+
+                let t_samples: Vec<_> = chain_samples
+                    .2
+                    .into_iter()
+                    .map(|x| Series::new("tsamp".into(), x))
+                    .collect();
+                let t_samples = Column::new("t".into(), t_samples);
+
+                let chain_df = DataFrame::new(vec![ll, n_samples, t_samples])?;
+
+                let chain_df = chain_df.lazy().with_column(lit(i as u64).alias("chain"));
+                chain_dfs.push(chain_df);
+            }
+
+            let mut df = concat(chain_dfs, UnionArgs::default())?.collect()?;
+
+            let mut out_path = opts.output;
+            out_path.set_extension("parquet");
+            let out_file = std::fs::File::create(out_path)?;
+            ParquetWriter::new(out_file).finish(&mut df)?;
+        }
+        Command::Skyline {
+            num_intervals,
+            t_scale,
+            alpha,
+            seed,
+            chains,
+            warmup,
+            sampling,
+        } => {
+            use skyline::*;
+
+            if t_scale <= 1. {
+                bail!("value of t_scale={:?} invalid. must be > 1", t_scale);
+            }
+
+            if alpha <= 0. {
+                bail!("value of alpha={:?} invalid. must be positive", alpha);
+            }
+
+            let parameters = parameters.expand_skyline(num_intervals)?;
+
+            let bar = indicatif::MultiProgress::new();
+            indicatif_log_bridge::LogWrapper::new(bar.clone(), logger).try_init()?;
+
+            let handles: Vec<_> = (0..chains)
+                .map(|_| {
+                    let data = data.clone();
+                    let parameters = parameters.clone();
+                    let bar = bar.clone();
+                    std::thread::spawn(move || {
+                        let mut chain =
+                            SkylineChain::new(&data, parameters, num_intervals, t_scale, alpha);
 
                         chain.run(warmup, sampling, seed, bar)
                     })
@@ -174,6 +241,13 @@ struct Opts {
         help = "pass a seed to bootstrap the rows of the input table"
     )]
     boot: Option<u64>,
+    #[arg(
+        short,
+        long,
+        default_value_t = false,
+        help = "use fast computation (aggregate segments on each chromosome)"
+    )]
+    fast: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -182,6 +256,51 @@ struct Opts {
 enum Command {
     Optim,
     Sample {
+        #[arg(
+            short,
+            long,
+            value_name = "SEED",
+            help = "random_seed",
+            default_value_t = 231
+        )]
+        seed: u64,
+        #[arg(
+            short = 'p',
+            long,
+            value_name = "CHAINS",
+            help = "number of parallel chains",
+            default_value_t = 1
+        )]
+        chains: usize,
+        #[arg(
+            value_name = "STEPS",
+            help = "number of warmup steps",
+            default_value_t = 1000
+        )]
+        warmup: usize,
+        #[arg(
+            value_name = "STEPS",
+            help = "number of sampling steps",
+            default_value_t = 5000
+        )]
+        sampling: usize,
+    },
+    Skyline {
+        #[arg(short = 'r', long, help = "number of intervals", default_value_t = 4)]
+        num_intervals: usize,
+        #[arg(
+            short = 'c',
+            long,
+            help = "expected ratio of breakpoint times",
+            default_value_t = 2.
+        )]
+        t_scale: f64,
+        #[arg(
+            short = 'A',
+            help = "variance of interval lenghts",
+            default_value_t = 7.
+        )]
+        alpha: f64,
         #[arg(
             short,
             long,

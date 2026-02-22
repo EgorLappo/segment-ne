@@ -40,3 +40,7 @@ pub fn log_neg_antiderivative(k: f64, t: f64, segment_start: f64, n: f64, mu: f6
 
     ans
 }
+
+pub fn log_lognormal_pdf(x: f64, mu: f64, sd: f64) -> f64 {
+    -(x * sd).ln() - (x.ln() - mu.ln()).powi(2) / (2. * sd * sd)
+}

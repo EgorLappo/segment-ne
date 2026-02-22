@@ -1,11 +1,11 @@
-use color_eyre::eyre::{Result, WrapErr, bail};
+use color_eyre::eyre::{bail, Result, WrapErr};
 use itertools::Itertools;
 
 #[derive(Debug, Clone)]
 pub struct ParameterList {
-    pub rec: Box<[f64]>,
-    pub fit: Box<[f64]>,
-    pub anc: Box<[f64]>,
+    rec: Box<[f64]>,
+    fit: Box<[f64]>,
+    anc: Box<[f64]>,
 }
 
 impl ParameterList {
@@ -15,10 +15,6 @@ impl ParameterList {
             fit: fit.into(),
             anc: anc.into(),
         }
-    }
-
-    pub fn init_values(&self) -> &[f64] {
-        &self.fit
     }
 
     pub fn num_fit(&self) -> usize {
@@ -31,6 +27,10 @@ impl ParameterList {
 
     pub fn set_fit(&mut self, val: &[f64]) {
         self.fit = val.into();
+    }
+
+    pub fn bounds_unchecked(&self) -> (f64, f64) {
+        (*self.rec.last().unwrap(), *self.anc.first().unwrap())
     }
 }
 
@@ -144,6 +144,45 @@ impl Parameters {
             adm_p: admixture_fraction,
             // NOTE: let users have 1-based, and we will use 0-based
             adm_idx: admixture_index - 1,
+        })
+    }
+
+    pub fn expand_skyline(self, r: usize) -> Result<Self> {
+        // ok here there is a lot of messy code that essentially tries to make
+        // a new method work without changing the notation
+
+        // we must validate and transform parameters because now a single `~` marker on n actually corresponds to *many* parameters being inferred!
+
+        // first make sure a single 'n' is marked to be inferred
+        if !(self.n.num_fit() == 1 && self.t.num_fit() == 0) {
+            bail!("too many parameters marked for inference. for skyline runs, please mark a *single* population size value");
+        }
+
+        // since there were no t to be fit, all values are in "recent" vector
+        // we need to split it so that t.rec AND t_anc
+
+        // now we must split this interval into r
+        // it's trivial with n
+        let mut en = self.n.clone();
+        en.set_fit(&vec![self.n.fit[0]; r]);
+
+        // but with t we need one less values
+        let mut et = self.t.clone();
+
+        et.rec = self.t.rec.iter().cloned().take(en.rec.len() + 1).collect();
+        et.anc = self.t.rec.iter().cloned().skip(en.rec.len() + 1).collect();
+        // (fill with a dummy value, we will replace it in chain init)
+        et.set_fit(&vec![0.0; r - 1]);
+
+        if et.rec.is_empty() || et.anc.is_empty() {
+            bail!("invalid time specification. for skyline runs, only inference on finite runs is supported")
+        }
+
+        Ok(Self {
+            n: en,
+            t: et,
+            adm_p: self.adm_p,
+            adm_idx: self.adm_idx,
         })
     }
 }

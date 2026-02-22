@@ -1,14 +1,14 @@
 use crate::{
     data::SegmentDivergence,
     observation::Observation,
-    parameter::{Parameters, get_tuples_sub},
+    parameter::{get_tuples_sub, Parameters},
 };
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use scirs2_optimize::{
     minimize_scalar,
-    unconstrained::{Bounds, Options, minimize_powell},
+    unconstrained::{minimize_powell, Bounds, Options},
 };
 
 pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f64> {
@@ -115,7 +115,7 @@ pub fn optimize_multivariable(
 
             -total
         },
-        Array1::from_vec([parameters.n.init_values(), parameters.t.init_values()].concat()),
+        Array1::from_vec([parameters.n.fit(), parameters.t.fit()].concat()),
         &options,
     )?;
 

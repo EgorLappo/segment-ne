@@ -13,7 +13,7 @@ pub struct SegmentDivergence {
     pub mu: f64, // mutation rate per segment, i.e. "length"
 }
 
-pub fn read_divergences(path: PathBuf) -> Result<Box<[SegmentDivergence]>> {
+pub fn read_divergences(path: PathBuf, fast: bool) -> Result<Box<[SegmentDivergence]>> {
     let input = Arc::from(path);
     let input = PlPath::Local(input);
 
@@ -35,14 +35,18 @@ pub fn read_divergences(path: PathBuf) -> Result<Box<[SegmentDivergence]>> {
         .collect();
     let pair = Series::new("pair_label".into(), pair);
 
-    let divs_seg = divs
-        .with_column(pair)?
-        .clone()
-        .lazy()
-        .group_by(["pair_label", "chrom"])
-        .agg([col("intersection_len").sum(), col("n_diff").sum()])
-        .filter(col("n_diff").gt(lit(0.0)))
-        .collect()?;
+    let divs_seg = divs.with_column(pair)?.clone().lazy();
+
+    let divs_seg = if fast {
+        // if we want to make it faster, sum the observations by chromosome
+        divs_seg
+            .group_by(["pair_label", "chrom"])
+            .agg([col("intersection_len").sum(), col("n_diff").sum()])
+    } else {
+        divs_seg
+    };
+
+    let divs_seg = divs_seg.filter(col("n_diff").gt(lit(0.0))).collect()?;
 
     let ans = divs_seg
         .column("n_diff")?
@@ -62,7 +66,11 @@ pub fn read_divergences(path: PathBuf) -> Result<Box<[SegmentDivergence]>> {
     Ok(ans)
 }
 
-pub fn bootstrap_divergences(path: PathBuf, seed: u64) -> Result<Box<[SegmentDivergence]>> {
+pub fn bootstrap_divergences(
+    path: PathBuf,
+    fast: bool,
+    seed: u64,
+) -> Result<Box<[SegmentDivergence]>> {
     let input = Arc::from(path);
     let input = PlPath::Local(input);
 
@@ -84,12 +92,17 @@ pub fn bootstrap_divergences(path: PathBuf, seed: u64) -> Result<Box<[SegmentDiv
         .collect();
     let pair = Series::new("pair_label".into(), pair);
 
-    let divs_seg = divs
-        .with_column(pair)?
-        .clone()
-        .lazy()
-        .group_by(["pair_label", "chrom"])
-        .agg([col("intersection_len").sum(), col("n_diff").sum()])
+    let divs_seg = divs.with_column(pair)?.clone().lazy();
+
+    let divs_seg = if fast {
+        // if we want to make it faster, sum the observations by chromosome
+        divs_seg
+            .group_by(["pair_label", "chrom"])
+            .agg([col("intersection_len").sum(), col("n_diff").sum()])
+    } else {
+        divs_seg
+    };
+    let divs_seg = divs_seg
         .filter(col("n_diff").gt(lit(0.0)))
         .collect()?
         .sample_frac(
