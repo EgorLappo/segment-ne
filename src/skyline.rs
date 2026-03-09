@@ -295,8 +295,6 @@ impl SkylineChain {
 // helper functions
 
 fn n_log_prior(ns: &[f64]) -> f64 {
-    use crate::lik::log_lognormal_pdf;
-
     // ns.iter()
     //     .map(|x| log_lognormal_pdf(*x, N_PRIOR_MEAN, N_PRIOR_SD))
     //     .sum::<f64>()

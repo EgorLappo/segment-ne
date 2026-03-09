@@ -1,7 +1,7 @@
 use crate::{lik, parameter::ParamTuples};
 use logsumexp::LogSumExp;
 
-use crate::parameter::{ParameterList, get_should_cache, get_tuples};
+use crate::parameter::{get_should_cache, get_tuples, ParameterList};
 
 #[derive(Debug, Clone)]
 pub struct Observation {
@@ -34,13 +34,8 @@ impl Observation {
             if *do_cache {
                 match (&ot_start, &ot_end) {
                     (Some(segment_start), Some(segment_end)) => {
-                        let term = lik::log_intergral_exact(
-                            k,
-                            *segment_start,
-                            *segment_end,
-                            *pop_size,
-                            mu,
-                        );
+                        let term =
+                            lik::log_integral_exact(k, *segment_start, *segment_end, *pop_size, mu);
 
                         term_cache.push(Some(term));
                     }
@@ -77,7 +72,7 @@ impl Observation {
                 (Some(segment_start), Some(segment_end)) => {
                     let segment_length = segment_end - segment_start;
                     let term = cache.unwrap_or_else(|| {
-                        lik::log_intergral_exact(
+                        lik::log_integral_exact(
                             self.k,
                             *segment_start,
                             *segment_end,
