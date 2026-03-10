@@ -85,10 +85,11 @@ pub fn get_should_cache(n: &ParameterList, t: &ParameterList) -> Vec<bool> {
 
 #[derive(Debug, Clone)]
 pub struct Parameters {
-    pub n: ParameterList,
-    pub t: ParameterList,
-    pub adm_p: f64,
-    pub adm_idx: usize,
+    pub n1: f64,          // fixed first size for scaling
+    pub c: ParameterList, // coalescence rates
+    pub t: ParameterList, // rate change times
+    pub adm_f: f64,       // admixture fraction
+    pub adm_idx: usize,   // admixture location
 }
 
 #[derive(Debug, Clone)]
@@ -108,7 +109,12 @@ impl Parameters {
         let mut change_times = parse_params(time_str)?;
 
         // validate parameter lengths
-        if change_times.len() + 1 == pop_sizes.len() {
+        if pop_sizes.len() < 2 {
+            bail!(
+                "error in sizes {}: please provide at least 2 sizes",
+                size_str
+            );
+        } else if change_times.len() + 1 == pop_sizes.len() {
             log::warn!(
                 "number of time parameters is one less than the number of size parameters. assuming you did not include time zero"
             );
@@ -138,10 +144,27 @@ impl Parameters {
         let (n_rec, n_fit, n_anc) = split_params(&pop_sizes);
         let (t_rec, t_fit, t_anc) = split_params(&change_times);
 
+        // transform parameters to coalescent scaling
+        let c_rec: Vec<f64> = n_rec.iter().map(|x| n_rec[0] / x).collect();
+        let c_fit: Vec<f64> = n_fit.iter().map(|x| n_rec[0] / x).collect();
+        let c_anc: Vec<f64> = n_anc.iter().map(|x| n_rec[0] / x).collect();
+        let tc_rec: Vec<f64> = t_rec.iter().map(|x| x / 2. / n_rec[0]).collect();
+        let tc_fit: Vec<f64> = t_fit.iter().map(|x| x / 2. / n_rec[0]).collect();
+        let tc_anc: Vec<f64> = t_anc.iter().map(|x| x / 2. / n_rec[0]).collect();
+
+        // for now, make sure that the first segment is known
+        if n_rec.len() == 0 {
+            bail!(
+                "error in sizes {}: cannot treat the most recent population size as inferrable",
+                size_str
+            );
+        }
+
         Ok(Self {
-            n: ParameterList::new(&n_rec, &n_fit, &n_anc),
-            t: ParameterList::new(&t_rec, &t_fit, &t_anc),
-            adm_p: admixture_fraction,
+            n1: n_rec[0],
+            c: ParameterList::new(&c_rec, &c_fit, &c_anc),
+            t: ParameterList::new(&tc_rec, &tc_fit, &tc_anc),
+            adm_f: admixture_fraction,
             // NOTE: let users have 1-based, and we will use 0-based
             adm_idx: admixture_index - 1,
         })
@@ -154,7 +177,7 @@ impl Parameters {
         // we must validate and transform parameters because now a single `~` marker on n actually corresponds to *many* parameters being inferred!
 
         // first make sure a single 'n' is marked to be inferred
-        if !(self.n.num_fit() == 1 && self.t.num_fit() == 0) {
+        if !(self.c.num_fit() == 1 && self.t.num_fit() == 0) {
             bail!("too many parameters marked for inference. for skyline runs, please mark a *single* population size value");
         }
 
@@ -163,14 +186,14 @@ impl Parameters {
 
         // now we must split this interval into r
         // it's trivial with n
-        let mut en = self.n.clone();
-        en.set_fit(&vec![self.n.fit[0]; r]);
+        let mut ec = self.c.clone();
+        ec.set_fit(&vec![self.c.fit[0]; r]);
 
         // but with t we need one less values
         let mut et = self.t.clone();
 
-        et.rec = self.t.rec.iter().cloned().take(en.rec.len() + 1).collect();
-        et.anc = self.t.rec.iter().cloned().skip(en.rec.len() + 1).collect();
+        et.rec = self.t.rec.iter().cloned().take(ec.rec.len() + 1).collect();
+        et.anc = self.t.rec.iter().cloned().skip(ec.rec.len() + 1).collect();
         // (fill with a dummy value, we will replace it in chain init)
         et.set_fit(&vec![0.0; r - 1]);
 
@@ -179,9 +202,10 @@ impl Parameters {
         }
 
         Ok(Self {
-            n: en,
+            n1: self.n1,
+            c: ec,
             t: et,
-            adm_p: self.adm_p,
+            adm_f: self.adm_f,
             adm_idx: self.adm_idx,
         })
     }

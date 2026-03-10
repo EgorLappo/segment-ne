@@ -18,19 +18,20 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
             Observation::new(
                 s.k,
                 s.mu,
-                &parameters.n,
+                &parameters.c,
                 &parameters.t,
-                parameters.adm_p,
+                parameters.adm_f,
                 parameters.adm_idx,
             )
         })
         .collect();
 
-    let result = if parameters.n.num_fit() == 1 {
-        minimize_scalar(
+    let result = if parameters.c.num_fit() == 1 {
+        // run optimization
+        let ans = minimize_scalar(
             |val| {
                 let param_tuples = get_tuples_sub(
-                    &parameters.n,
+                    &parameters.c,
                     &parameters.t,
                     std::slice::from_ref(&val),
                     &Vec::new(),
@@ -43,12 +44,17 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
             Some((1.0, 100000.0)),
             scirs2_optimize::scalar::Method::Bounded,
             None,
-        )?
+        )?;
+
+        log::debug!("{:?}", ans);
+
+        // we are fitting n, so convert back from coalrate
+        parameters.n1 / ans.x
     } else if parameters.t.num_fit() == 1 {
-        minimize_scalar(
+        let ans = minimize_scalar(
             |val| {
                 let param_tuples = get_tuples_sub(
-                    &parameters.n,
+                    &parameters.c,
                     &parameters.t,
                     &Vec::new(),
                     std::slice::from_ref(&val),
@@ -61,27 +67,30 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
             Some((1.0, 100000.0)),
             scirs2_optimize::scalar::Method::Bounded,
             None,
-        )?
+        )?;
+
+        log::debug!("{:?}", ans);
+
+        // we are fitting t, so convert back
+        ans.x * 2. * parameters.n1
     } else {
         bail!("cannot perform single-variable optimization. check inputs!");
     };
 
-    log::debug!("{:?}", result);
-
-    Ok(result.x)
+    Ok(result)
 }
 
 pub fn optimize_multivariable(
     data: &[SegmentDivergence],
     parameters: Parameters,
-) -> Result<Vec<f64>> {
-    let nv = parameters.n.num_fit();
+) -> Result<(Vec<f64>, Vec<f64>)> {
+    let cv = parameters.c.num_fit();
     let tv = parameters.t.num_fit();
 
     let options = Options {
         bounds: Some(Bounds::from_vecs(
-            vec![Some(1.0); nv + tv],
-            vec![Some(100000.0); nv + tv],
+            vec![Some(1.0); cv + tv],
+            vec![Some(100000.0); cv + tv],
         )?),
         ..Default::default()
     };
@@ -92,9 +101,9 @@ pub fn optimize_multivariable(
             Observation::new(
                 s.k,
                 s.mu,
-                &parameters.n,
+                &parameters.c,
                 &parameters.t,
-                parameters.adm_p,
+                parameters.adm_f,
                 parameters.adm_idx,
             )
         })
@@ -105,21 +114,30 @@ pub fn optimize_multivariable(
             let fit_vals = fit_vals.as_slice().unwrap();
 
             let param_tuples = get_tuples_sub(
-                &parameters.n,
+                &parameters.c,
                 &parameters.t,
-                &fit_vals[0..nv],
-                &fit_vals[nv..(nv + tv)],
+                &fit_vals[0..cv],
+                &fit_vals[cv..(cv + tv)],
             );
 
             let total: f64 = obs.par_iter().map(|o| o.lpdf(&param_tuples)).sum();
 
             -total
         },
-        Array1::from_vec([parameters.n.fit(), parameters.t.fit()].concat()),
+        Array1::from_vec([parameters.c.fit(), parameters.t.fit()].concat()),
         &options,
     )?;
 
     log::debug!("{:?}", result);
 
-    Ok(result.x.to_vec())
+    let n_ans: Vec<f64> = result.x.to_vec()[0..cv]
+        .iter()
+        .map(|x| parameters.n1 / x)
+        .collect();
+    let t_ans: Vec<f64> = result.x.to_vec()[cv..(cv + tv)]
+        .iter()
+        .map(|x| x * 2. * parameters.n1)
+        .collect();
+
+    Ok((n_ans, t_ans))
 }

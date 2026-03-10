@@ -35,7 +35,7 @@ fn main() -> Result<()> {
 
     match opts.command {
         Command::Optim => {
-            let total_fit_params = parameters.t.num_fit() + parameters.n.num_fit();
+            let total_fit_params = parameters.t.num_fit() + parameters.c.num_fit();
             // optimization only works with variable population size (s)
             if total_fit_params == 0 {
                 bail!("no parameters to be fit were provided. please annotate them with '~'")
@@ -49,11 +49,13 @@ fn main() -> Result<()> {
                 let mut file = std::fs::File::create(opts.output)?;
                 writeln!(file, "{:?}", result)?;
             } else {
-                let result = optim::optimize_multivariable(&data, parameters)?;
-                println!("{:?}", result);
+                let (n, t) = optim::optimize_multivariable(&data, parameters)?;
+                println!("{:?}", n);
+                println!("{:?}", t);
 
                 let mut file = std::fs::File::create(opts.output)?;
-                writeln!(file, "{:?}", result.iter().format(" "))?;
+                writeln!(file, "{:?}", n.iter().format(" "))?;
+                writeln!(file, "{:?}", t.iter().format(" "))?;
             }
         }
         Command::Sample {
