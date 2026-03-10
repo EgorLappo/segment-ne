@@ -10,13 +10,14 @@ use crate::parameter::{get_tuples, get_tuples_sub, ParameterList, Parameters};
 
 const ACC_RATE_LO: usize = 25;
 const ACC_RATE_HI: usize = 35;
-const SD_INIT: f64 = 10.;
+const SD_INIT: f64 = 1.;
 const SD_UPDATE_RATE: f64 = 0.05;
 const N_RECENT_STEPS: usize = 100;
 
 #[derive(Debug, Clone)]
 pub struct Chain {
-    pub n: ParameterList,
+    n1: f64, // first population size for scaling
+    pub c: ParameterList,
     pub t: ParameterList,
     pub obs: Vec<Observation>,
     pub loglik: f64,
@@ -30,22 +31,24 @@ type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>);
 
 impl Chain {
     pub fn new(data: &[SegmentDivergence], parameters: Parameters) -> Self {
-        let n = parameters.n.clone();
+        let n1 = parameters.n1;
+        let c = parameters.c.clone();
         let t = parameters.t.clone();
 
         let obs: Vec<Observation> = data
             .iter()
-            .map(|s| Observation::new(s.k, s.mu, &n, &t, parameters.adm_p, parameters.adm_idx))
+            .map(|s| Observation::new(s.k, s.mu, &c, &t, parameters.adm_f, parameters.adm_idx))
             .collect();
 
-        let param_tuples = get_tuples(&n, &t);
+        let param_tuples = get_tuples(&c, &t);
 
         let loglik = obs.iter().map(|o| o.lpdf(&param_tuples)).sum();
 
         let steps = vec![0; N_RECENT_STEPS].into();
 
         Self {
-            n,
+            n1,
+            c,
             t,
             obs,
             loglik,
@@ -57,12 +60,12 @@ impl Chain {
 
     fn step<R: Rng>(&mut self, rng: &mut R) {
         // propose
-        let new_nfit: Vec<f64> = self
-            .n
+        let new_cfit: Vec<f64> = self
+            .c
             .fit()
             .iter()
             .zip(rng.sample_iter::<f64, _>(StandardNormal))
-            .map(|(n, x)| n + self.sd * x)
+            .map(|(c, x)| c + self.sd * x)
             .collect();
 
         // TODO: note that this is ill-defined right now
@@ -75,7 +78,7 @@ impl Chain {
             .map(|(t, x)| t + self.sd * x)
             .collect();
 
-        let new_param_tuples = get_tuples_sub(&self.n, &self.t, &new_nfit, &new_tfit);
+        let new_param_tuples = get_tuples_sub(&self.c, &self.t, &new_cfit, &new_tfit);
 
         // hack: return/reject immediately if times not ordered
         if !new_param_tuples
@@ -97,10 +100,10 @@ impl Chain {
         let log_ratio: f64 = new_loglik - self.loglik;
 
         log::debug!(
-            "step {}: n: {:?} -> {:?}",
+            "step {}: c: {:?} -> {:?}",
             self.step_count,
-            self.n.fit(),
-            new_nfit
+            self.c.fit(),
+            new_cfit
         );
         log::debug!(
             "step {}: t: {:?} -> {:?}",
@@ -117,7 +120,7 @@ impl Chain {
 
         if rand::random::<f64>() <= log_ratio.exp() {
             // accept
-            self.n.set_fit(&new_nfit);
+            self.c.set_fit(&new_cfit);
             self.t.set_fit(&new_tfit);
 
             self.loglik = new_loglik;
@@ -189,8 +192,10 @@ impl Chain {
             self.step(&mut rng);
 
             lls.push(self.loglik);
-            n_samples.push(self.n.fit().into());
-            t_samples.push(self.t.fit().into());
+
+            // convert back from coalescent scale
+            n_samples.push(self.c.fit().iter().map(|x| self.n1 / x).collect());
+            t_samples.push(self.t.fit().iter().map(|x| x * 2. * self.n1).collect());
 
             pb.inc(1);
         }

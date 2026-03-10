@@ -7,7 +7,7 @@ use crate::parameter::{get_should_cache, get_tuples, ParameterList};
 pub struct Observation {
     k: f64,
     mu: f64,
-    log_adm_p: f64,
+    log_adm_f: f64,
     adm_idx: usize,
     // term cache goes here
     term_cache: Vec<Option<f64>>,
@@ -17,7 +17,7 @@ impl Observation {
     pub fn new(
         k: f64,
         mu: f64,
-        n: &ParameterList,
+        c: &ParameterList,
         t: &ParameterList,
         adm_p: f64,
         adm_idx: usize,
