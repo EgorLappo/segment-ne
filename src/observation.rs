@@ -1,4 +1,4 @@
-use crate::{lik, parameter::ParamTuples};
+use crate::parameter::ParamTuples;
 use logsumexp::LogSumExp;
 
 use crate::parameter::{get_should_cache, get_tuples, ParameterList};
@@ -19,28 +19,28 @@ impl Observation {
         mu: f64,
         c: &ParameterList,
         t: &ParameterList,
-        adm_p: f64,
+        adm_f: f64,
         adm_idx: usize,
     ) -> Self {
         // init cache
         let mut term_cache = Vec::new();
 
-        let param_tuples = get_tuples(n, t);
-        let should_cache = get_should_cache(n, t);
+        let param_tuples = get_tuples(c, t);
+        let should_cache = get_should_cache(c, t);
 
-        for (((ot_start, ot_end), pop_size), do_cache) in
+        for (((ot_start, ot_end), coalrate), do_cache) in
             param_tuples.iter().zip(should_cache.iter())
         {
             if *do_cache {
                 match (&ot_start, &ot_end) {
                     (Some(segment_start), Some(segment_end)) => {
                         let term =
-                            lik::log_integral_exact(k, *segment_start, *segment_end, *pop_size, mu);
+                            log_integral_exact(k, *segment_start, *segment_end, *coalrate, mu);
 
                         term_cache.push(Some(term));
                     }
                     (Some(segment_start), Option::None) => {
-                        let term = lik::log_integral_exact_inf(k, *segment_start, *pop_size, mu);
+                        let term = log_integral_exact_inf(k, *segment_start, *coalrate, mu);
                         term_cache.push(Some(term));
                     }
                     _ => unreachable!(),
@@ -54,31 +54,23 @@ impl Observation {
             k,
             mu,
             term_cache,
-            log_adm_p: adm_p.ln(),
+            log_adm_f: adm_f.ln(),
             adm_idx,
         }
     }
 
     pub fn lpdf(&self, p: &ParamTuples) -> f64 {
-        // draft: use full computation each time
-
         let mut ans: f64 = 0.0;
         let mut total: Vec<f64> = Vec::with_capacity(10);
 
-        for (i, (((ot_start, ot_end), pop_size), cache)) in
+        for (i, (((ot_start, ot_end), coalrate), cache)) in
             p.iter().zip(self.term_cache.iter()).enumerate()
         {
             match (&ot_start, &ot_end) {
                 (Some(segment_start), Some(segment_end)) => {
                     let segment_length = segment_end - segment_start;
                     let term = cache.unwrap_or_else(|| {
-                        lik::log_integral_exact(
-                            self.k,
-                            *segment_start,
-                            *segment_end,
-                            *pop_size,
-                            self.mu,
-                        )
+                        log_integral_exact(self.k, *segment_start, *segment_end, *coalrate, self.mu)
                     });
 
                     // adjust likelihood to account for admixture fraction
@@ -88,20 +80,20 @@ impl Observation {
                     //     right admixing (e.g.neanderthal) population)
                     // so, we weigh segments before admixture we with admix_fraction
                     //    and those after with admix_fraction^2, and, of course,
-                    //    we do not care about constant terms so divide by admix_fraction
+                    //    we do not care about constant terms so divide both by admix_fraction
 
                     if i <= self.adm_idx {
                         total.push(term + ans);
                     } else {
-                        total.push(term + ans + self.log_adm_p);
+                        total.push(term + ans + self.log_adm_f);
                     }
 
-                    ans += -segment_length / (2. * pop_size);
+                    ans += -segment_length * coalrate;
                 }
                 // NOTE: rust-analyzer bug? Doesn't see this None as enum variant
                 (Some(segment_start), Option::None) => {
                     let term = cache.unwrap_or_else(|| {
-                        lik::log_integral_exact_inf(self.k, *segment_start, *pop_size, self.mu)
+                        log_integral_exact_inf(self.k, *segment_start, *coalrate, self.mu)
                     });
                     total.push(term + ans);
                 }
@@ -110,5 +102,24 @@ impl Observation {
         }
 
         total.iter().ln_sum_exp()
+    }
+}
+
+pub fn log_integral_exact(k: f64, ts: f64, te: f64, c: f64, theta: f64) -> f64 {
+    if ts == 0.0 {
+        xsf::gammainc(1. + k, (c + theta) * te).ln() - (1. + k) * (c + theta).ln()
+    } else {
+        let numerator =
+            xsf::gammaincc(1. + k, (c + theta) * ts) - xsf::gammaincc(1. + k, (c + theta) * te);
+
+        numerator.ln() + c * ts - (1. + k) * (c + theta).ln()
+    }
+}
+
+pub fn log_integral_exact_inf(k: f64, ts: f64, c: f64, theta: f64) -> f64 {
+    if ts == 0.0 {
+        -(1. + k) * (c + theta).ln()
+    } else {
+        c * ts + xsf::gammaincc(1. + k, (c + theta) * ts).ln() - (1. + k) * (c + theta).ln()
     }
 }

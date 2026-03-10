@@ -6,7 +6,6 @@ use std::io::Write;
 use std::path::PathBuf;
 
 mod data;
-mod lik;
 mod mcmc;
 mod observation;
 mod optim;

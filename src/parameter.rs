@@ -36,38 +36,38 @@ impl ParameterList {
 
 pub type ParamTuples = Box<[((Option<f64>, Option<f64>), f64)]>;
 
-pub fn get_tuples(n: &ParameterList, t: &ParameterList) -> ParamTuples {
+pub fn get_tuples(c: &ParameterList, t: &ParameterList) -> ParamTuples {
     let ti = itertools::chain!(t.rec.iter(), t.fit.iter(), t.anc.iter()).copied();
-    let ni = itertools::chain!(n.rec.iter(), n.fit.iter(), n.anc.iter()).copied();
+    let ci = itertools::chain!(c.rec.iter(), c.fit.iter(), c.anc.iter()).copied();
 
     ti.map(Some)
         .chain(std::iter::once(None))
         .tuple_windows::<(Option<f64>, Option<f64>)>()
-        .zip(ni)
+        .zip(ci)
         .collect()
 }
 
 pub fn get_tuples_sub(
-    n: &ParameterList,
+    c: &ParameterList,
     t: &ParameterList,
-    n_sub: &[f64],
+    c_sub: &[f64],
     t_sub: &[f64],
 ) -> ParamTuples {
     let ti = itertools::chain!(t.rec.iter(), t_sub.iter(), t.anc.iter()).copied();
-    let ni = itertools::chain!(n.rec.iter(), n_sub.iter(), n.anc.iter()).copied();
+    let ci = itertools::chain!(c.rec.iter(), c_sub.iter(), c.anc.iter()).copied();
 
     ti.map(Some)
         .chain(std::iter::once(None))
         .tuple_windows::<(Option<f64>, Option<f64>)>()
-        .zip(ni)
+        .zip(ci)
         .collect()
 }
 
-pub fn get_should_cache(n: &ParameterList, t: &ParameterList) -> Vec<bool> {
-    let ni = itertools::chain!(
-        n.rec.iter().map(|_| false),
-        n.fit.iter().map(|_| true),
-        n.anc.iter().map(|_| false)
+pub fn get_should_cache(c: &ParameterList, t: &ParameterList) -> Vec<bool> {
+    let ci = itertools::chain!(
+        c.rec.iter().map(|_| false),
+        c.fit.iter().map(|_| true),
+        c.anc.iter().map(|_| false)
     );
     let ti = itertools::chain!(
         t.rec.iter().map(|_| false),
@@ -78,7 +78,7 @@ pub fn get_should_cache(n: &ParameterList, t: &ParameterList) -> Vec<bool> {
     ti.map(Some)
         .chain(std::iter::once(None))
         .tuple_windows()
-        .zip(ni)
+        .zip(ci)
         .map(|((x, y), z)| !(x.unwrap_or(false) || y.unwrap_or(false) || z))
         .collect()
 }
@@ -153,7 +153,7 @@ impl Parameters {
         let tc_anc: Vec<f64> = t_anc.iter().map(|x| x / 2. / n_rec[0]).collect();
 
         // for now, make sure that the first segment is known
-        if n_rec.len() == 0 {
+        if n_rec.is_empty() {
             bail!(
                 "error in sizes {}: cannot treat the most recent population size as inferrable",
                 size_str
@@ -172,7 +172,7 @@ impl Parameters {
 
     pub fn expand_skyline(self, r: usize) -> Result<Self> {
         // ok here there is a lot of messy code that essentially tries to make
-        // a new method work without changing the notation
+        // a new method work without changing the user-facing "notation"
 
         // we must validate and transform parameters because now a single `~` marker on n actually corresponds to *many* parameters being inferred!
 
