@@ -135,7 +135,12 @@ impl SkylineChain {
 
         let obs: Vec<Observation> = data
             .iter()
-            .map(|s| Observation::new(s.k, s.mu, &c, &t, parameters.adm_f, parameters.adm_idx))
+            .map(|s| {
+                // we get L*mu_bp from the data
+                // we want to fit with theta = 4 N_1 mu
+                let theta = 4. * s.mu * parameters.n1;
+                Observation::new(s.k, theta, &c, &t, parameters.adm_f, parameters.adm_idx)
+            })
             .collect();
 
         let param_tuples = get_tuples(&c, &t);

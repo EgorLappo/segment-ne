@@ -13,9 +13,18 @@ mod parameter;
 mod skyline;
 
 fn main() -> Result<()> {
-    let logger =
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).build();
+    // init error handling
     color_eyre::install()?;
+
+    // build logger right away
+    let logger =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).build();
+    // the logger ^ is not initialized as we also need to make it
+    // work with the progress bar. so, create the bar and init logger
+    let bar = indicatif::MultiProgress::new();
+    indicatif_log_bridge::LogWrapper::new(bar.clone(), logger).try_init()?;
+
+    // finally, we can parse the args
     let opts = Opts::parse();
 
     // parameter validation
@@ -64,9 +73,6 @@ fn main() -> Result<()> {
             sampling,
         } => {
             use mcmc::*;
-
-            let bar = indicatif::MultiProgress::new();
-            indicatif_log_bridge::LogWrapper::new(bar.clone(), logger).try_init()?;
 
             let handles: Vec<_> = (0..chains)
                 .map(|_| {
@@ -135,9 +141,6 @@ fn main() -> Result<()> {
             }
 
             let parameters = parameters.expand_skyline(num_intervals)?;
-
-            let bar = indicatif::MultiProgress::new();
-            indicatif_log_bridge::LogWrapper::new(bar.clone(), logger).try_init()?;
 
             let handles: Vec<_> = (0..chains)
                 .map(|_| {

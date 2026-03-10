@@ -6,7 +6,7 @@ use crate::parameter::{get_should_cache, get_tuples, ParameterList};
 #[derive(Debug, Clone)]
 pub struct Observation {
     k: f64,
-    mu: f64,
+    theta: f64,
     log_adm_f: f64,
     adm_idx: usize,
     // term cache goes here
@@ -16,7 +16,7 @@ pub struct Observation {
 impl Observation {
     pub fn new(
         k: f64,
-        mu: f64,
+        theta: f64,
         c: &ParameterList,
         t: &ParameterList,
         adm_f: f64,
@@ -35,12 +35,12 @@ impl Observation {
                 match (&ot_start, &ot_end) {
                     (Some(segment_start), Some(segment_end)) => {
                         let term =
-                            log_integral_exact(k, *segment_start, *segment_end, *coalrate, mu);
+                            log_integral_exact(k, *segment_start, *segment_end, *coalrate, theta);
 
                         term_cache.push(Some(term));
                     }
                     (Some(segment_start), Option::None) => {
-                        let term = log_integral_exact_inf(k, *segment_start, *coalrate, mu);
+                        let term = log_integral_exact_inf(k, *segment_start, *coalrate, theta);
                         term_cache.push(Some(term));
                     }
                     _ => unreachable!(),
@@ -52,7 +52,7 @@ impl Observation {
 
         Self {
             k,
-            mu,
+            theta,
             term_cache,
             log_adm_f: adm_f.ln(),
             adm_idx,
@@ -70,7 +70,13 @@ impl Observation {
                 (Some(segment_start), Some(segment_end)) => {
                     let segment_length = segment_end - segment_start;
                     let term = cache.unwrap_or_else(|| {
-                        log_integral_exact(self.k, *segment_start, *segment_end, *coalrate, self.mu)
+                        log_integral_exact(
+                            self.k,
+                            *segment_start,
+                            *segment_end,
+                            *coalrate,
+                            self.theta,
+                        )
                     });
 
                     // adjust likelihood to account for admixture fraction
@@ -83,9 +89,9 @@ impl Observation {
                     //    we do not care about constant terms so divide both by admix_fraction
 
                     if i <= self.adm_idx {
-                        total.push(term + ans);
+                        total.push(term + coalrate.ln() + ans);
                     } else {
-                        total.push(term + ans + self.log_adm_f);
+                        total.push(term + coalrate.ln() + ans + self.log_adm_f);
                     }
 
                     ans += -segment_length * coalrate;
@@ -93,9 +99,9 @@ impl Observation {
                 // NOTE: rust-analyzer bug? Doesn't see this None as enum variant
                 (Some(segment_start), Option::None) => {
                     let term = cache.unwrap_or_else(|| {
-                        log_integral_exact_inf(self.k, *segment_start, *coalrate, self.mu)
+                        log_integral_exact_inf(self.k, *segment_start, *coalrate, self.theta)
                     });
-                    total.push(term + ans);
+                    total.push(term + ans + coalrate.ln() + self.log_adm_f);
                 }
                 _ => unreachable!(),
             }

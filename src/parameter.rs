@@ -148,10 +148,12 @@ impl Parameters {
         let c_rec: Vec<f64> = n_rec.iter().map(|x| n_rec[0] / x).collect();
         let c_fit: Vec<f64> = n_fit.iter().map(|x| n_rec[0] / x).collect();
         let c_anc: Vec<f64> = n_anc.iter().map(|x| n_rec[0] / x).collect();
+        let c_params = ParameterList::new(&c_rec, &c_fit, &c_anc);
+
         let tc_rec: Vec<f64> = t_rec.iter().map(|x| x / 2. / n_rec[0]).collect();
         let tc_fit: Vec<f64> = t_fit.iter().map(|x| x / 2. / n_rec[0]).collect();
         let tc_anc: Vec<f64> = t_anc.iter().map(|x| x / 2. / n_rec[0]).collect();
-
+        let tc_params = ParameterList::new(&tc_rec, &tc_fit, &tc_anc);
         // for now, make sure that the first segment is known
         if n_rec.is_empty() {
             bail!(
@@ -160,10 +162,21 @@ impl Parameters {
             );
         }
 
+        log::debug!(
+            "converted sizes to coalescence rates: {:?} -> {:?}",
+            size_str,
+            c_params
+        );
+        log::debug!(
+            "converted times to coalescent scale:  {:?} -> {:?}",
+            time_str,
+            tc_params
+        );
+
         Ok(Self {
             n1: n_rec[0],
-            c: ParameterList::new(&c_rec, &c_fit, &c_anc),
-            t: ParameterList::new(&tc_rec, &tc_fit, &tc_anc),
+            c: c_params,
+            t: tc_params,
             adm_f: admixture_fraction,
             // NOTE: let users have 1-based, and we will use 0-based
             adm_idx: admixture_index - 1,

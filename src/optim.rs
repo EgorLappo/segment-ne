@@ -15,9 +15,12 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
     let obs: Vec<Observation> = data
         .iter()
         .map(|s| {
+            // we get L*mu_bp from the data
+            // we want to fit with theta = 4 N_1 mu
+            let theta = 4. * s.mu * parameters.n1;
             Observation::new(
                 s.k,
-                s.mu,
+                theta,
                 &parameters.c,
                 &parameters.t,
                 parameters.adm_f,
@@ -41,7 +44,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
 
                 -total
             },
-            Some((1.0, 100000.0)),
+            Some((0.0, 100.0)),
             scirs2_optimize::scalar::Method::Bounded,
             None,
         )?;
@@ -89,8 +92,8 @@ pub fn optimize_multivariable(
 
     let options = Options {
         bounds: Some(Bounds::from_vecs(
-            vec![Some(1.0); cv + tv],
-            vec![Some(100000.0); cv + tv],
+            vec![Some(0.0); cv + tv],
+            vec![Some(100.0); cv + tv],
         )?),
         ..Default::default()
     };
@@ -98,9 +101,12 @@ pub fn optimize_multivariable(
     let obs: Vec<Observation> = data
         .iter()
         .map(|s| {
+            // we get L*mu_bp from the data
+            // we want to fit with theta = 4 N_1 mu
+            let theta = 4. * s.mu * parameters.n1;
             Observation::new(
                 s.k,
-                s.mu,
+                theta,
                 &parameters.c,
                 &parameters.t,
                 parameters.adm_f,
