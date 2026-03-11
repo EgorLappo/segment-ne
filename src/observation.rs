@@ -17,7 +17,7 @@ impl Observation {
     pub fn new(
         k: f64,
         theta: f64,
-        c: &ParameterList,
+        log_c: &ParameterList,
         t: &ParameterList,
         adm_f: f64,
         adm_idx: usize,
@@ -25,8 +25,8 @@ impl Observation {
         // init cache
         let mut term_cache = Vec::new();
 
-        let param_tuples = get_tuples(c, t);
-        let should_cache = get_should_cache(c, t);
+        let param_tuples = get_tuples(log_c, t);
+        let should_cache = get_should_cache(log_c, t);
 
         for (((ot_start, ot_end), coalrate), do_cache) in
             param_tuples.iter().zip(should_cache.iter())

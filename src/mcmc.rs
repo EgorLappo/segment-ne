@@ -17,7 +17,7 @@ const N_RECENT_STEPS: usize = 100;
 #[derive(Debug, Clone)]
 pub struct Chain {
     n1: f64, // first population size for scaling
-    pub c: ParameterList,
+    pub log_c: ParameterList,
     pub t: ParameterList,
     pub obs: Vec<Observation>,
     pub loglik: f64,
@@ -27,12 +27,12 @@ pub struct Chain {
     steps: VecDeque<u8>,
 }
 
-type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>);
+type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>, Vec<Box<[f64]>>);
 
 impl Chain {
     pub fn new(data: &[SegmentDivergence], parameters: Parameters) -> Self {
         let n1 = parameters.n1;
-        let c = parameters.c.clone();
+        let log_c = parameters.log_c.clone();
         let t = parameters.t.clone();
 
         let obs: Vec<Observation> = data
@@ -41,11 +41,11 @@ impl Chain {
                 // we get L*mu_bp from the data
                 // we want to fit with theta = 4 N_1 mu
                 let theta = 4. * s.mu * parameters.n1;
-                Observation::new(s.k, theta, &c, &t, parameters.adm_f, parameters.adm_idx)
+                Observation::new(s.k, theta, &log_c, &t, parameters.adm_f, parameters.adm_idx)
             })
             .collect();
 
-        let param_tuples = get_tuples(&c, &t);
+        let param_tuples = get_tuples(&log_c, &t);
 
         let loglik = obs.iter().map(|o| o.lpdf(&param_tuples)).sum();
 
@@ -53,7 +53,7 @@ impl Chain {
 
         Self {
             n1,
-            c,
+            log_c,
             t,
             obs,
             loglik,
@@ -65,12 +65,12 @@ impl Chain {
 
     fn step<R: Rng>(&mut self, rng: &mut R) {
         // propose
-        let new_cfit: Vec<f64> = self
-            .c
+        let new_lcfit: Vec<f64> = self
+            .log_c
             .fit()
             .iter()
             .zip(rng.sample_iter::<f64, _>(StandardNormal))
-            .map(|(c, x)| c + self.sd * x)
+            .map(|(lc, x)| lc + self.sd * x)
             .collect();
 
         // TODO: note that this is ill-defined right now
@@ -83,7 +83,7 @@ impl Chain {
             .map(|(t, x)| t + self.sd * x)
             .collect();
 
-        let new_param_tuples = get_tuples_sub(&self.c, &self.t, &new_cfit, &new_tfit);
+        let new_param_tuples = get_tuples_sub(&self.log_c, &self.t, &new_lcfit, &new_tfit);
 
         // hack: return/reject immediately if times not ordered
         if !new_param_tuples
@@ -105,10 +105,10 @@ impl Chain {
         let log_ratio: f64 = new_loglik - self.loglik;
 
         log::debug!(
-            "step {}: c: {:?} -> {:?}",
+            "step {}: log-c: {:?} -> {:?}",
             self.step_count,
-            self.c.fit(),
-            new_cfit
+            self.log_c.fit(),
+            new_lcfit
         );
         log::debug!(
             "step {}: t: {:?} -> {:?}",
@@ -125,7 +125,7 @@ impl Chain {
 
         if rand::random::<f64>() <= log_ratio.exp() {
             // accept
-            self.c.set_fit(&new_cfit);
+            self.log_c.set_fit(&new_lcfit);
             self.t.set_fit(&new_tfit);
 
             self.loglik = new_loglik;
@@ -173,6 +173,7 @@ impl Chain {
         bar: MultiProgress,
     ) -> ChainOutput {
         let mut lls = Vec::with_capacity(sampling);
+        let mut log_c_samples = Vec::with_capacity(sampling);
         let mut n_samples = Vec::with_capacity(sampling);
         let mut t_samples = Vec::with_capacity(sampling);
 
@@ -197,9 +198,8 @@ impl Chain {
             self.step(&mut rng);
 
             lls.push(self.loglik);
-
-            // convert back from coalescent scale
-            n_samples.push(self.c.fit().iter().map(|x| self.n1 / x).collect());
+            log_c_samples.push(self.log_c.fit().iter().cloned().collect());
+            n_samples.push(self.log_c.fit().iter().map(|x| self.n1 / x.exp()).collect());
             t_samples.push(self.t.fit().iter().map(|x| x * 2. * self.n1).collect());
 
             pb.inc(1);
@@ -207,7 +207,7 @@ impl Chain {
 
         pb.finish();
 
-        (lls, n_samples, t_samples)
+        (lls, n_samples, t_samples, log_c_samples)
     }
 }
 

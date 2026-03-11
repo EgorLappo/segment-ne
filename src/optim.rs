@@ -21,7 +21,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
             Observation::new(
                 s.k,
                 theta,
-                &parameters.c,
+                &parameters.log_c,
                 &parameters.t,
                 parameters.adm_f,
                 parameters.adm_idx,
@@ -29,12 +29,12 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
         })
         .collect();
 
-    let result = if parameters.c.num_fit() == 1 {
+    let result = if parameters.log_c.num_fit() == 1 {
         // run optimization
         let ans = minimize_scalar(
             |val| {
                 let param_tuples = get_tuples_sub(
-                    &parameters.c,
+                    &parameters.log_c,
                     &parameters.t,
                     std::slice::from_ref(&val),
                     &Vec::new(),
@@ -44,7 +44,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
 
                 -total
             },
-            Some((0.0, 100.0)),
+            Some((0.0, 10.0)),
             scirs2_optimize::scalar::Method::Bounded,
             None,
         )?;
@@ -52,12 +52,12 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
         log::debug!("{:?}", ans);
 
         // we are fitting n, so convert back from coalrate
-        parameters.n1 / ans.x
+        parameters.n1 / ans.x.exp()
     } else if parameters.t.num_fit() == 1 {
         let ans = minimize_scalar(
             |val| {
                 let param_tuples = get_tuples_sub(
-                    &parameters.c,
+                    &parameters.log_c,
                     &parameters.t,
                     &Vec::new(),
                     std::slice::from_ref(&val),
@@ -67,7 +67,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
 
                 -total
             },
-            Some((1.0, 100000.0)),
+            Some((0.0, 10.0)),
             scirs2_optimize::scalar::Method::Bounded,
             None,
         )?;
@@ -87,13 +87,13 @@ pub fn optimize_multivariable(
     data: &[SegmentDivergence],
     parameters: Parameters,
 ) -> Result<(Vec<f64>, Vec<f64>)> {
-    let cv = parameters.c.num_fit();
+    let cv = parameters.log_c.num_fit();
     let tv = parameters.t.num_fit();
 
     let options = Options {
         bounds: Some(Bounds::from_vecs(
             vec![Some(0.0); cv + tv],
-            vec![Some(100.0); cv + tv],
+            vec![Some(10.0); cv + tv],
         )?),
         ..Default::default()
     };
@@ -107,7 +107,7 @@ pub fn optimize_multivariable(
             Observation::new(
                 s.k,
                 theta,
-                &parameters.c,
+                &parameters.log_c,
                 &parameters.t,
                 parameters.adm_f,
                 parameters.adm_idx,
@@ -120,7 +120,7 @@ pub fn optimize_multivariable(
             let fit_vals = fit_vals.as_slice().unwrap();
 
             let param_tuples = get_tuples_sub(
-                &parameters.c,
+                &parameters.log_c,
                 &parameters.t,
                 &fit_vals[0..cv],
                 &fit_vals[cv..(cv + tv)],
@@ -130,7 +130,7 @@ pub fn optimize_multivariable(
 
             -total
         },
-        Array1::from_vec([parameters.c.fit(), parameters.t.fit()].concat()),
+        Array1::from_vec([parameters.log_c.fit(), parameters.t.fit()].concat()),
         &options,
     )?;
 
@@ -138,7 +138,7 @@ pub fn optimize_multivariable(
 
     let n_ans: Vec<f64> = result.x.to_vec()[0..cv]
         .iter()
-        .map(|x| parameters.n1 / x)
+        .map(|x| parameters.n1 / x.exp())
         .collect();
     let t_ans: Vec<f64> = result.x.to_vec()[cv..(cv + tv)]
         .iter()

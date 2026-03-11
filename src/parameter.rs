@@ -36,9 +36,10 @@ impl ParameterList {
 
 pub type ParamTuples = Box<[((Option<f64>, Option<f64>), f64)]>;
 
-pub fn get_tuples(c: &ParameterList, t: &ParameterList) -> ParamTuples {
+pub fn get_tuples(log_c: &ParameterList, t: &ParameterList) -> ParamTuples {
     let ti = itertools::chain!(t.rec.iter(), t.fit.iter(), t.anc.iter()).copied();
-    let ci = itertools::chain!(c.rec.iter(), c.fit.iter(), c.anc.iter()).copied();
+    let ci =
+        itertools::chain!(log_c.rec.iter(), log_c.fit.iter(), log_c.anc.iter()).map(|x| x.exp());
 
     ti.map(Some)
         .chain(std::iter::once(None))
@@ -48,13 +49,14 @@ pub fn get_tuples(c: &ParameterList, t: &ParameterList) -> ParamTuples {
 }
 
 pub fn get_tuples_sub(
-    c: &ParameterList,
+    log_c: &ParameterList,
     t: &ParameterList,
-    c_sub: &[f64],
+    log_c_sub: &[f64],
     t_sub: &[f64],
 ) -> ParamTuples {
     let ti = itertools::chain!(t.rec.iter(), t_sub.iter(), t.anc.iter()).copied();
-    let ci = itertools::chain!(c.rec.iter(), c_sub.iter(), c.anc.iter()).copied();
+    let ci =
+        itertools::chain!(log_c.rec.iter(), log_c_sub.iter(), log_c.anc.iter()).map(|x| x.exp());
 
     ti.map(Some)
         .chain(std::iter::once(None))
@@ -85,11 +87,11 @@ pub fn get_should_cache(c: &ParameterList, t: &ParameterList) -> Vec<bool> {
 
 #[derive(Debug, Clone)]
 pub struct Parameters {
-    pub n1: f64,          // fixed first size for scaling
-    pub c: ParameterList, // coalescence rates
-    pub t: ParameterList, // rate change times
-    pub adm_f: f64,       // admixture fraction
-    pub adm_idx: usize,   // admixture location
+    pub n1: f64,              // fixed first size for scaling
+    pub log_c: ParameterList, // coalescence rates, on a log scale
+    pub t: ParameterList,     // rate change times
+    pub adm_f: f64,           // admixture fraction
+    pub adm_idx: usize,       // admixture location
 }
 
 #[derive(Debug, Clone)]
@@ -145,10 +147,11 @@ impl Parameters {
         let (t_rec, t_fit, t_anc) = split_params(&change_times);
 
         // transform parameters to coalescent scaling
-        let c_rec: Vec<f64> = n_rec.iter().map(|x| n_rec[0] / x).collect();
-        let c_fit: Vec<f64> = n_fit.iter().map(|x| n_rec[0] / x).collect();
-        let c_anc: Vec<f64> = n_anc.iter().map(|x| n_rec[0] / x).collect();
-        let c_params = ParameterList::new(&c_rec, &c_fit, &c_anc);
+        // with the coalrates, use the log scale for fitting
+        let c_rec: Vec<f64> = n_rec.iter().map(|x| (n_rec[0] / x).ln()).collect();
+        let c_fit: Vec<f64> = n_fit.iter().map(|x| (n_rec[0] / x).ln()).collect();
+        let c_anc: Vec<f64> = n_anc.iter().map(|x| (n_rec[0] / x).ln()).collect();
+        let log_c_params = ParameterList::new(&c_rec, &c_fit, &c_anc);
 
         let tc_rec: Vec<f64> = t_rec.iter().map(|x| x / 2. / n_rec[0]).collect();
         let tc_fit: Vec<f64> = t_fit.iter().map(|x| x / 2. / n_rec[0]).collect();
@@ -165,7 +168,7 @@ impl Parameters {
         log::debug!(
             "converted sizes to coalescence rates: {:?} -> {:?}",
             size_str,
-            c_params
+            log_c_params
         );
         log::debug!(
             "converted times to coalescent scale:  {:?} -> {:?}",
@@ -175,7 +178,7 @@ impl Parameters {
 
         Ok(Self {
             n1: n_rec[0],
-            c: c_params,
+            log_c: log_c_params,
             t: tc_params,
             adm_f: admixture_fraction,
             // NOTE: let users have 1-based, and we will use 0-based
@@ -190,7 +193,7 @@ impl Parameters {
         // we must validate and transform parameters because now a single `~` marker on n actually corresponds to *many* parameters being inferred!
 
         // first make sure a single 'n' is marked to be inferred
-        if !(self.c.num_fit() == 1 && self.t.num_fit() == 0) {
+        if !(self.log_c.num_fit() == 1 && self.t.num_fit() == 0) {
             bail!("too many parameters marked for inference. for skyline runs, please mark a *single* population size value");
         }
 
@@ -199,8 +202,8 @@ impl Parameters {
 
         // now we must split this interval into r
         // it's trivial with n
-        let mut ec = self.c.clone();
-        ec.set_fit(&vec![self.c.fit[0]; r]);
+        let mut ec = self.log_c.clone();
+        ec.set_fit(&vec![self.log_c.fit[0]; r]);
 
         // but with t we need one less values
         let mut et = self.t.clone();
@@ -216,7 +219,7 @@ impl Parameters {
 
         Ok(Self {
             n1: self.n1,
-            c: ec,
+            log_c: ec,
             t: et,
             adm_f: self.adm_f,
             adm_idx: self.adm_idx,

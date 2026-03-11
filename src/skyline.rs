@@ -11,10 +11,10 @@ use crate::parameter::{get_tuples, get_tuples_sub, ParameterList, Parameters};
 
 const ACC_RATE_LO: usize = 25;
 const ACC_RATE_HI: usize = 35;
-const SD_INIT: f64 = 30.;
-const SD_MIN: f64 = 20.;
-const SD_MAX: f64 = 60.;
-const SD_UPDATE_RATE: f64 = 0.05;
+const SD_INIT: f64 = 0.1;
+const SD_MIN: f64 = 0.;
+const SD_MAX: f64 = 3.;
+const SD_UPDATE_RATE: f64 = 0.01;
 const N_RECENT_STEPS: usize = 100;
 
 const N_PRIOR_MEAN: f64 = 5000.;
@@ -23,7 +23,7 @@ const N_PRIOR_SD: f64 = 1.;
 #[derive(Debug, Clone)]
 pub struct SkylineChain {
     n1: f64,
-    pub c: ParameterList,
+    pub log_c: ParameterList,
     pub t: ParameterList,
     pub obs: Vec<Observation>,
     pub loglik: f64,
@@ -92,7 +92,7 @@ impl DirichletPrior {
     }
 }
 
-type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>);
+type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>, Vec<Box<[f64]>>);
 
 impl SkylineChain {
     pub fn new(
@@ -103,7 +103,7 @@ impl SkylineChain {
         alpha: f64,
     ) -> Self {
         let n1 = parameters.n1;
-        let c = parameters.c.clone();
+        let log_c = parameters.log_c.clone();
         let mut t = parameters.t.clone();
 
         // initialize the prior for t
@@ -139,19 +139,20 @@ impl SkylineChain {
                 // we get L*mu_bp from the data
                 // we want to fit with theta = 4 N_1 mu
                 let theta = 4. * s.mu * parameters.n1;
-                Observation::new(s.k, theta, &c, &t, parameters.adm_f, parameters.adm_idx)
+                Observation::new(s.k, theta, &log_c, &t, parameters.adm_f, parameters.adm_idx)
             })
             .collect();
 
-        let param_tuples = get_tuples(&c, &t);
+        let param_tuples = get_tuples(&log_c, &t);
 
-        let loglik = obs.iter().map(|o| o.lpdf(&param_tuples)).sum::<f64>() + c_log_prior(c.fit());
+        let loglik =
+            obs.iter().map(|o| o.lpdf(&param_tuples)).sum::<f64>() + c_log_prior(log_c.fit());
 
         let steps = vec![0; N_RECENT_STEPS].into();
 
         Self {
             n1,
-            c,
+            log_c,
             t,
             obs,
             loglik,
@@ -163,16 +164,16 @@ impl SkylineChain {
     }
 
     fn step<R: Rng>(&mut self, rng: &mut R) {
-        let new_cfit: Vec<f64> = if self.step_count.is_multiple_of(2) {
+        let new_lcfit: Vec<f64> = if self.step_count.is_multiple_of(2) {
             // propose
-            self.c
+            self.log_c
                 .fit()
                 .iter()
                 .zip(rng.sample_iter::<f64, _>(StandardNormal))
-                .map(|(c, x)| c + self.sd * x)
+                .map(|(lc, x)| lc + self.sd * x)
                 .collect()
         } else {
-            self.c.fit().to_vec()
+            self.log_c.fit().to_vec()
         };
 
         let new_tfit: Vec<f64> = if !self.step_count.is_multiple_of(2) {
@@ -181,14 +182,14 @@ impl SkylineChain {
             self.t.fit().to_vec()
         };
 
-        let new_param_tuples = get_tuples_sub(&self.c, &self.t, &new_cfit, &new_tfit);
+        let new_param_tuples = get_tuples_sub(&self.log_c, &self.t, &new_lcfit, &new_tfit);
 
         let new_loglik = self
             .obs
             .par_iter()
             .map(|o| o.lpdf(&new_param_tuples))
             .sum::<f64>()
-            + c_log_prior(&new_cfit);
+            + c_log_prior(&new_lcfit);
 
         // NOTE to future self:
         //  we use *symmetric* gaussian proposal
@@ -196,10 +197,10 @@ impl SkylineChain {
         let log_ratio: f64 = new_loglik - self.loglik;
 
         log::debug!(
-            "step {}: c: {:?} -> {:?}",
+            "step {}: log-c: {:?} -> {:?}",
             self.step_count,
-            self.c.fit(),
-            new_cfit
+            self.log_c.fit(),
+            new_lcfit
         );
         log::debug!(
             "step {}: t: {:?} -> {:?}",
@@ -216,7 +217,7 @@ impl SkylineChain {
 
         if rand::random::<f64>() <= log_ratio.exp() {
             // accept
-            self.c.set_fit(&new_cfit);
+            self.log_c.set_fit(&new_lcfit);
             self.t.set_fit(&new_tfit);
 
             self.loglik = new_loglik;
@@ -264,6 +265,7 @@ impl SkylineChain {
         bar: MultiProgress,
     ) -> ChainOutput {
         let mut lls = Vec::with_capacity(sampling);
+        let mut log_c_samples = Vec::with_capacity(sampling);
         let mut n_samples = Vec::with_capacity(sampling);
         let mut t_samples = Vec::with_capacity(sampling);
 
@@ -288,7 +290,8 @@ impl SkylineChain {
             self.step(&mut rng);
 
             lls.push(self.loglik);
-            n_samples.push(self.c.fit().iter().map(|x| self.n1 / x).collect());
+            log_c_samples.push(self.log_c.fit().iter().cloned().collect());
+            n_samples.push(self.log_c.fit().iter().map(|x| self.n1 / x.exp()).collect());
             t_samples.push(self.t.fit().iter().map(|x| x * 2. * self.n1).collect());
 
             pb.inc(1);
@@ -296,7 +299,7 @@ impl SkylineChain {
 
         pb.finish();
 
-        (lls, n_samples, t_samples)
+        (lls, n_samples, t_samples, log_c_samples)
     }
 }
 

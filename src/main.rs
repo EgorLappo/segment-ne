@@ -43,7 +43,7 @@ fn main() -> Result<()> {
 
     match opts.command {
         Command::Optim => {
-            let total_fit_params = parameters.t.num_fit() + parameters.c.num_fit();
+            let total_fit_params = parameters.t.num_fit() + parameters.log_c.num_fit();
             // optimization only works with variable population size (s)
             if total_fit_params == 0 {
                 bail!("no parameters to be fit were provided. please annotate them with '~'")
@@ -87,32 +87,14 @@ fn main() -> Result<()> {
                 })
                 .collect();
 
-            let mut chain_dfs = Vec::new();
-
-            for (i, h) in handles.into_iter().enumerate() {
-                let chain_samples = h.join().expect("could not join on a thread");
-
-                let ll = Column::new("loglik".into(), chain_samples.0);
-
-                let n_samples: Vec<_> = chain_samples
-                    .1
-                    .into_iter()
-                    .map(|x| Series::new("nsamp".into(), x))
-                    .collect();
-                let n_samples = Column::new("n".into(), n_samples);
-
-                let t_samples: Vec<_> = chain_samples
-                    .2
-                    .into_iter()
-                    .map(|x| Series::new("tsamp".into(), x))
-                    .collect();
-                let t_samples = Column::new("t".into(), t_samples);
-
-                let chain_df = DataFrame::new(vec![ll, n_samples, t_samples])?;
-
-                let chain_df = chain_df.lazy().with_column(lit(i as u64).alias("chain"));
-                chain_dfs.push(chain_df);
-            }
+            let chain_dfs = handles
+                .into_iter()
+                .enumerate()
+                .map(|(i, h)| {
+                    let chain_samples = h.join().expect("could not join on a thread");
+                    make_chain_df(i, chain_samples)
+                })
+                .collect::<Result<Vec<LazyFrame>>>()?;
 
             let mut df = concat(chain_dfs, UnionArgs::default())?.collect()?;
 
@@ -156,32 +138,14 @@ fn main() -> Result<()> {
                 })
                 .collect();
 
-            let mut chain_dfs = Vec::new();
-
-            for (i, h) in handles.into_iter().enumerate() {
-                let chain_samples = h.join().expect("could not join on a thread");
-
-                let ll = Column::new("loglik".into(), chain_samples.0);
-
-                let n_samples: Vec<_> = chain_samples
-                    .1
-                    .into_iter()
-                    .map(|x| Series::new("nsamp".into(), x))
-                    .collect();
-                let n_samples = Column::new("n".into(), n_samples);
-
-                let t_samples: Vec<_> = chain_samples
-                    .2
-                    .into_iter()
-                    .map(|x| Series::new("tsamp".into(), x))
-                    .collect();
-                let t_samples = Column::new("t".into(), t_samples);
-
-                let chain_df = DataFrame::new(vec![ll, n_samples, t_samples])?;
-
-                let chain_df = chain_df.lazy().with_column(lit(i as u64).alias("chain"));
-                chain_dfs.push(chain_df);
-            }
+            let chain_dfs = handles
+                .into_iter()
+                .enumerate()
+                .map(|(i, h)| {
+                    let chain_samples = h.join().expect("could not join on a thread");
+                    make_chain_df(i, chain_samples)
+                })
+                .collect::<Result<Vec<LazyFrame>>>()?;
 
             let mut df = concat(chain_dfs, UnionArgs::default())?.collect()?;
 
@@ -334,4 +298,42 @@ enum Command {
         )]
         sampling: usize,
     },
+}
+
+// helper functions
+
+pub fn make_chain_df(
+    chain_index: usize,
+    chain_samples: (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>, Vec<Box<[f64]>>),
+) -> Result<LazyFrame> {
+    let ll = Column::new("loglik".into(), chain_samples.0);
+
+    let n_samples: Vec<_> = chain_samples
+        .1
+        .into_iter()
+        .map(|x| Series::new("nsamp".into(), x))
+        .collect();
+    let n_samples = Column::new("n".into(), n_samples);
+
+    let t_samples: Vec<_> = chain_samples
+        .2
+        .into_iter()
+        .map(|x| Series::new("tsamp".into(), x))
+        .collect();
+    let t_samples = Column::new("t".into(), t_samples);
+
+    let log_c_samples: Vec<_> = chain_samples
+        .3
+        .into_iter()
+        .map(|x| Series::new("lcsamp".into(), x))
+        .collect();
+    let log_c_samples = Column::new("log_c".into(), log_c_samples);
+
+    let chain_df = DataFrame::new(vec![ll, n_samples, t_samples, log_c_samples])?;
+
+    let chain_df = chain_df
+        .lazy()
+        .with_column(lit(chain_index as u64).alias("chain"));
+
+    Ok(chain_df)
 }
