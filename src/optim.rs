@@ -17,7 +17,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
         .map(|s| {
             // we get L*mu_bp from the data
             // we want to fit with theta = 4 N_1 mu
-            let theta = 4. * s.mu * parameters.n1;
+            let theta = 4. * s.mu * parameters.n_scale;
             Observation::new(
                 s.k,
                 theta,
@@ -52,7 +52,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
         log::debug!("{:?}", ans);
 
         // we are fitting n, so convert back from coalrate
-        parameters.n1 / ans.x.exp()
+        parameters.n_scale / ans.x.exp()
     } else if parameters.t.num_fit() == 1 {
         let ans = minimize_scalar(
             |val| {
@@ -75,7 +75,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
         log::debug!("{:?}", ans);
 
         // we are fitting t, so convert back
-        ans.x * 2. * parameters.n1
+        ans.x * 2. * parameters.n_scale
     } else {
         bail!("cannot perform single-variable optimization. check inputs!");
     };
@@ -103,7 +103,7 @@ pub fn optimize_multivariable(
         .map(|s| {
             // we get L*mu_bp from the data
             // we want to fit with theta = 4 N_1 mu
-            let theta = 4. * s.mu * parameters.n1;
+            let theta = 4. * s.mu * parameters.n_scale;
             Observation::new(
                 s.k,
                 theta,
@@ -138,11 +138,11 @@ pub fn optimize_multivariable(
 
     let n_ans: Vec<f64> = result.x.to_vec()[0..cv]
         .iter()
-        .map(|x| parameters.n1 / x.exp())
+        .map(|x| parameters.n_scale / x.exp())
         .collect();
     let t_ans: Vec<f64> = result.x.to_vec()[cv..(cv + tv)]
         .iter()
-        .map(|x| x * 2. * parameters.n1)
+        .map(|x| x * 2. * parameters.n_scale)
         .collect();
 
     Ok((n_ans, t_ans))

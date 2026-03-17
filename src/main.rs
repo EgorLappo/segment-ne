@@ -27,12 +27,16 @@ fn main() -> Result<()> {
     // finally, we can parse the args
     let opts = Opts::parse();
 
+    // we have an option to override the value used for coalescent scaling
+    let n_scale = opts.coal_scale.map(|x| x as f64);
+
     // parameter validation
     let parameters = crate::parameter::Parameters::new(
         &opts.pop_sizes,
         &opts.change_times,
         opts.admixture_fraction,
         opts.admixture_index,
+        n_scale,
     )?;
 
     let data = if let Some(boot) = opts.boot {
@@ -189,6 +193,12 @@ struct Opts {
     )]
     admixture_index: usize,
     #[arg(
+        long,
+        value_name = "SIZE",
+        help = "population size to use for coalescent scaling (overrides the value from the population size history)"
+    )]
+    coal_scale: Option<usize>,
+    #[arg(
         short = 'n',
         long = "sizes",
         value_name = "LIST",
@@ -301,11 +311,9 @@ enum Command {
 }
 
 // helper functions
+type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>, Vec<Box<[f64]>>);
 
-pub fn make_chain_df(
-    chain_index: usize,
-    chain_samples: (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>, Vec<Box<[f64]>>),
-) -> Result<LazyFrame> {
+pub fn make_chain_df(chain_index: usize, chain_samples: ChainOutput) -> Result<LazyFrame> {
     let ll = Column::new("loglik".into(), chain_samples.0);
 
     let n_samples: Vec<_> = chain_samples

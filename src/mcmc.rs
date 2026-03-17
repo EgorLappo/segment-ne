@@ -16,7 +16,7 @@ const N_RECENT_STEPS: usize = 100;
 
 #[derive(Debug, Clone)]
 pub struct Chain {
-    n1: f64, // first population size for scaling
+    n_scale: f64, // first population size for scaling
     pub log_c: ParameterList,
     pub t: ParameterList,
     pub obs: Vec<Observation>,
@@ -31,7 +31,7 @@ type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>, Vec<Box<[f64]>>)
 
 impl Chain {
     pub fn new(data: &[SegmentDivergence], parameters: Parameters) -> Self {
-        let n1 = parameters.n1;
+        let n_scale = parameters.n_scale;
         let log_c = parameters.log_c.clone();
         let t = parameters.t.clone();
 
@@ -40,7 +40,7 @@ impl Chain {
             .map(|s| {
                 // we get L*mu_bp from the data
                 // we want to fit with theta = 4 N_1 mu
-                let theta = 4. * s.mu * parameters.n1;
+                let theta = 4. * s.mu * parameters.n_scale;
                 Observation::new(s.k, theta, &log_c, &t, parameters.adm_f, parameters.adm_idx)
             })
             .collect();
@@ -52,7 +52,7 @@ impl Chain {
         let steps = vec![0; N_RECENT_STEPS].into();
 
         Self {
-            n1,
+            n_scale,
             log_c,
             t,
             obs,
@@ -199,8 +199,14 @@ impl Chain {
 
             lls.push(self.loglik);
             log_c_samples.push(self.log_c.fit().iter().cloned().collect());
-            n_samples.push(self.log_c.fit().iter().map(|x| self.n1 / x.exp()).collect());
-            t_samples.push(self.t.fit().iter().map(|x| x * 2. * self.n1).collect());
+            n_samples.push(
+                self.log_c
+                    .fit()
+                    .iter()
+                    .map(|x| self.n_scale / x.exp())
+                    .collect(),
+            );
+            t_samples.push(self.t.fit().iter().map(|x| x * 2. * self.n_scale).collect());
 
             pb.inc(1);
         }

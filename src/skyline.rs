@@ -17,17 +17,18 @@ const SD_MAX: f64 = 3.;
 const SD_UPDATE_RATE: f64 = 0.01;
 const N_RECENT_STEPS: usize = 100;
 
-const N_PRIOR_MEAN: f64 = 5000.;
-const N_PRIOR_SD: f64 = 1.;
+// laplace prior for difference of population sizes
+const N_PRIOR_B: f64 = 1.;
 
 #[derive(Debug, Clone)]
 pub struct SkylineChain {
-    n1: f64,
+    n_scale: f64,
     pub log_c: ParameterList,
     pub t: ParameterList,
     pub obs: Vec<Observation>,
     pub loglik: f64,
     t_prior: DirichletPrior,
+    t_update_every: usize,
     sd: f64, // std. dev. of the proposal
     step_count: usize,
     // store recent
@@ -36,10 +37,10 @@ pub struct SkylineChain {
 
 #[derive(Debug, Clone)]
 struct DirichletPrior {
-    ntr: usize,
-    scale: f64,
-    alpha: f64,
-    lambdas: Vec<f64>,
+    // ntr: usize,
+    // scale: f64,
+    // alpha: f64,
+    // lambdas: Vec<f64>,
     dist: Dirichlet<f64>,
     target_offset: f64,
     target_mult: f64,
@@ -62,10 +63,10 @@ impl DirichletPrior {
         let values = lambdas.clone();
 
         Self {
-            ntr,
-            scale,
-            alpha,
-            lambdas,
+            // ntr,
+            // scale,
+            // alpha,
+            // lambdas,
             dist,
             target_offset: target_interval.0,
             target_mult: target_interval.1 - target_interval.0,
@@ -102,7 +103,7 @@ impl SkylineChain {
         t_scale: f64,
         alpha: f64,
     ) -> Self {
-        let n1 = parameters.n1;
+        let n_scale = parameters.n_scale;
         let log_c = parameters.log_c.clone();
         let mut t = parameters.t.clone();
 
@@ -138,7 +139,7 @@ impl SkylineChain {
             .map(|s| {
                 // we get L*mu_bp from the data
                 // we want to fit with theta = 4 N_1 mu
-                let theta = 4. * s.mu * parameters.n1;
+                let theta = 4. * s.mu * parameters.n_scale;
                 Observation::new(s.k, theta, &log_c, &t, parameters.adm_f, parameters.adm_idx)
             })
             .collect();
@@ -150,13 +151,18 @@ impl SkylineChain {
 
         let steps = vec![0; N_RECENT_STEPS].into();
 
+        // NOTE: expose this option later?
+        // step switch: how often to change t vs n (do it on different steps)
+        let t_update_every = 2;
+
         Self {
-            n1,
+            n_scale,
             log_c,
             t,
             obs,
             loglik,
             t_prior,
+            t_update_every,
             sd: SD_INIT,
             step_count: 0,
             steps,
@@ -164,23 +170,27 @@ impl SkylineChain {
     }
 
     fn step<R: Rng>(&mut self, rng: &mut R) {
-        let new_lcfit: Vec<f64> = if self.step_count.is_multiple_of(2) {
-            // propose
-            self.log_c
-                .fit()
-                .iter()
-                .zip(rng.sample_iter::<f64, _>(StandardNormal))
-                .map(|(lc, x)| lc + self.sd * x)
-                .collect()
-        } else {
-            self.log_c.fit().to_vec()
-        };
+        // if `t_update_every` is 1, update both coalrates and t on each step
+        // otherwise, update t every `t_update_every`)))
+        let new_lcfit: Vec<f64> =
+            if self.t_update_every == 1 || !self.step_count.is_multiple_of(self.t_update_every) {
+                // propose
+                self.log_c
+                    .fit()
+                    .iter()
+                    .zip(rng.sample_iter::<f64, _>(StandardNormal))
+                    .map(|(lc, x)| lc + self.sd * x)
+                    .collect()
+            } else {
+                self.log_c.fit().to_vec()
+            };
 
-        let new_tfit: Vec<f64> = if !self.step_count.is_multiple_of(2) {
-            self.t_prior.sample(rng)
-        } else {
-            self.t.fit().to_vec()
-        };
+        let new_tfit: Vec<f64> =
+            if self.t_update_every == 1 || self.step_count.is_multiple_of(self.t_update_every) {
+                self.t_prior.sample(rng)
+            } else {
+                self.t.fit().to_vec()
+            };
 
         let new_param_tuples = get_tuples_sub(&self.log_c, &self.t, &new_lcfit, &new_tfit);
 
@@ -291,8 +301,14 @@ impl SkylineChain {
 
             lls.push(self.loglik);
             log_c_samples.push(self.log_c.fit().iter().cloned().collect());
-            n_samples.push(self.log_c.fit().iter().map(|x| self.n1 / x.exp()).collect());
-            t_samples.push(self.t.fit().iter().map(|x| x * 2. * self.n1).collect());
+            n_samples.push(
+                self.log_c
+                    .fit()
+                    .iter()
+                    .map(|x| self.n_scale / x.exp())
+                    .collect(),
+            );
+            t_samples.push(self.t.fit().iter().map(|x| x * 2. * self.n_scale).collect());
 
             pb.inc(1);
         }
@@ -306,8 +322,9 @@ impl SkylineChain {
 // helper functions
 
 fn c_log_prior(ns: &[f64]) -> f64 {
-    // ns.iter()
-    //     .map(|x| log_lognormal_pdf(*x, N_PRIOR_MEAN, N_PRIOR_SD))
-    //     .sum::<f64>()
-    0.0
+    ns.iter()
+        .zip(ns.iter().skip(1))
+        // log laplace density
+        .map(|(x, y)| -(x - y).abs() / N_PRIOR_B)
+        .sum()
 }

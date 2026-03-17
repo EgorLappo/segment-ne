@@ -87,7 +87,7 @@ pub fn get_should_cache(c: &ParameterList, t: &ParameterList) -> Vec<bool> {
 
 #[derive(Debug, Clone)]
 pub struct Parameters {
-    pub n1: f64,              // fixed first size for scaling
+    pub n_scale: f64,         // fixed first size for scaling
     pub log_c: ParameterList, // coalescence rates, on a log scale
     pub t: ParameterList,     // rate change times
     pub adm_f: f64,           // admixture fraction
@@ -106,6 +106,7 @@ impl Parameters {
         time_str: &str,
         admixture_fraction: f64,
         admixture_index: usize,
+        n_scale: Option<f64>,
     ) -> Result<Self> {
         let pop_sizes = parse_params(size_str)?;
         let mut change_times = parse_params(time_str)?;
@@ -146,6 +147,26 @@ impl Parameters {
         let (n_rec, n_fit, n_anc) = split_params(&pop_sizes);
         let (t_rec, t_fit, t_anc) = split_params(&change_times);
 
+        let n_scale = if let Some(n_scale_param) = n_scale {
+            log::debug!(
+                "using provided coalescent scaling factor {:?}",
+                n_scale_param
+            );
+            n_scale_param
+        } else if !n_rec.is_empty() {
+            log::debug!(
+                "using first constant population size {:?} as scaling factor",
+                n_rec[0]
+            );
+            n_rec[0]
+        } else {
+            log::debug!(
+                "using initial value for the first unknown population size {:?} as scaling factor",
+                n_fit[0]
+            );
+            n_fit[0]
+        };
+
         // transform parameters to coalescent scaling
         // with the coalrates, use the log scale for fitting
         let c_rec: Vec<f64> = n_rec.iter().map(|x| (n_rec[0] / x).ln()).collect();
@@ -153,17 +174,10 @@ impl Parameters {
         let c_anc: Vec<f64> = n_anc.iter().map(|x| (n_rec[0] / x).ln()).collect();
         let log_c_params = ParameterList::new(&c_rec, &c_fit, &c_anc);
 
-        let tc_rec: Vec<f64> = t_rec.iter().map(|x| x / 2. / n_rec[0]).collect();
-        let tc_fit: Vec<f64> = t_fit.iter().map(|x| x / 2. / n_rec[0]).collect();
-        let tc_anc: Vec<f64> = t_anc.iter().map(|x| x / 2. / n_rec[0]).collect();
+        let tc_rec: Vec<f64> = t_rec.iter().map(|x| x / 2. / n_scale).collect();
+        let tc_fit: Vec<f64> = t_fit.iter().map(|x| x / 2. / n_scale).collect();
+        let tc_anc: Vec<f64> = t_anc.iter().map(|x| x / 2. / n_scale).collect();
         let tc_params = ParameterList::new(&tc_rec, &tc_fit, &tc_anc);
-        // for now, make sure that the first segment is known
-        if n_rec.is_empty() {
-            bail!(
-                "error in sizes {}: cannot treat the most recent population size as inferrable",
-                size_str
-            );
-        }
 
         log::debug!(
             "converted sizes to coalescence rates: {:?} -> {:?}",
@@ -177,7 +191,7 @@ impl Parameters {
         );
 
         Ok(Self {
-            n1: n_rec[0],
+            n_scale,
             log_c: log_c_params,
             t: tc_params,
             adm_f: admixture_fraction,
@@ -218,7 +232,7 @@ impl Parameters {
         }
 
         Ok(Self {
-            n1: self.n1,
+            n_scale: self.n_scale,
             log_c: ec,
             t: et,
             adm_f: self.adm_f,
