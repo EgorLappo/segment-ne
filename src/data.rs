@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{bail, Result};
 use polars::prelude::*;
 
 const MU: f64 = 1.29e-8;
@@ -17,10 +17,21 @@ pub fn read_divergences(path: PathBuf, fast: bool) -> Result<Box<[SegmentDiverge
     let input = Arc::from(path);
     let input = PlPath::Local(input);
 
+    let schema = LazyFrame::scan_parquet(input.clone(), Default::default())?.collect_schema()?;
+
+    // to accomodate more input files, we will accept both "diff" (new) and "n_diff" (old) columns names
+    let diff_column = if schema.contains("n_diff") {
+        "n_diff"
+    } else if schema.contains("diff") {
+        "diff"
+    } else {
+        bail!("no divergence column found in input table! please ensure you have a column named 'n_diff' or 'diff'")
+    };
+
     let mut divs = LazyFrame::scan_parquet(input, Default::default())?
         .sort(["sa", "sb", "chrom"], Default::default())
         .with_columns([
-            col("n_diff").cast(DataType::Float64),
+            col(diff_column).cast(DataType::Float64),
             col("intersection_len").cast(DataType::Float64),
         ])
         .collect()?;
@@ -33,7 +44,7 @@ pub fn read_divergences(path: PathBuf, fast: bool) -> Result<Box<[SegmentDiverge
         .zip(sb.iter())
         .map(|(x, y)| format!("{};{}", x.unwrap(), y.unwrap()))
         .collect();
-    let pair = Series::new("pair_label".into(), pair);
+    let pair = Column::new("pair_label".into(), pair);
 
     let divs_seg = divs.with_column(pair)?.clone().lazy();
 
@@ -41,15 +52,15 @@ pub fn read_divergences(path: PathBuf, fast: bool) -> Result<Box<[SegmentDiverge
         // if we want to make it faster, sum the observations by chromosome
         divs_seg
             .group_by(["pair_label", "chrom"])
-            .agg([col("intersection_len").sum(), col("n_diff").sum()])
+            .agg([col("intersection_len").sum(), col(diff_column).sum()])
     } else {
         divs_seg
     };
 
-    let divs_seg = divs_seg.filter(col("n_diff").gt(lit(0.0))).collect()?;
+    let divs_seg = divs_seg.filter(col(diff_column).gt(lit(0.0))).collect()?;
 
     let ans = divs_seg
-        .column("n_diff")?
+        .column(diff_column)?
         .f64()?
         .iter()
         .map(|x| x.unwrap())
@@ -74,10 +85,21 @@ pub fn bootstrap_divergences(
     let input = Arc::from(path);
     let input = PlPath::Local(input);
 
+    let schema = LazyFrame::scan_parquet(input.clone(), Default::default())?.collect_schema()?;
+
+    // to accomodate more input files, we will accept both "diff" (new) and "n_diff" (old) columns names
+    let diff_column = if schema.contains("n_diff") {
+        "n_diff"
+    } else if schema.contains("diff") {
+        "diff"
+    } else {
+        bail!("no divergence column found in input table! please ensure you have a column named 'n_diff' or 'diff'")
+    };
+
     let mut divs = LazyFrame::scan_parquet(input, Default::default())?
         .sort(["sa", "sb", "chrom"], Default::default())
         .with_columns([
-            col("n_diff").cast(DataType::Float64),
+            col(diff_column).cast(DataType::Float64),
             col("intersection_len").cast(DataType::Float64),
         ])
         .collect()?;
@@ -90,7 +112,7 @@ pub fn bootstrap_divergences(
         .zip(sb.iter())
         .map(|(x, y)| format!("{};{}", x.unwrap(), y.unwrap()))
         .collect();
-    let pair = Series::new("pair_label".into(), pair);
+    let pair = Column::new("pair_label".into(), pair);
 
     let divs_seg = divs.with_column(pair)?.clone().lazy();
 
@@ -98,12 +120,12 @@ pub fn bootstrap_divergences(
         // if we want to make it faster, sum the observations by chromosome
         divs_seg
             .group_by(["pair_label", "chrom"])
-            .agg([col("intersection_len").sum(), col("n_diff").sum()])
+            .agg([col("intersection_len").sum(), col(diff_column).sum()])
     } else {
         divs_seg
     };
     let divs_seg = divs_seg
-        .filter(col("n_diff").gt(lit(0.0)))
+        .filter(col(diff_column).gt(lit(0.0)))
         .collect()?
         .sample_frac(
             &Series::new("frac".into(), &[1.0f64]),
@@ -113,7 +135,7 @@ pub fn bootstrap_divergences(
         )?;
 
     let ans = divs_seg
-        .column("n_diff")?
+        .column(diff_column)?
         .f64()?
         .iter()
         .map(|x| x.unwrap())

@@ -164,7 +164,7 @@ fn main() -> Result<()> {
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(version, about = "Sample from Ewens distibution conditional on number of observed alleles.", long_about = None)]
+#[command(version, about = "demographic mcmc for segments", long_about = None)]
 struct Opts {
     #[arg(short, long, value_name = "IN", help = "input parquet file(s)")]
     input: PathBuf,
