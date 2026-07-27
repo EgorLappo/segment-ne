@@ -49,7 +49,7 @@ impl Chain {
 
         let loglik = obs.iter().map(|o| o.lpdf(&param_tuples)).sum();
 
-        let steps = vec![0; N_RECENT_STEPS].into();
+        let steps = vec![0; 1].into();
 
         Self {
             n_scale,
@@ -93,7 +93,9 @@ impl Chain {
         {
             log::warn!("t proposal: not ordered, rejecting right away");
             self.step_count += 1;
-            self.steps.pop_front();
+            if self.steps.len() >= N_RECENT_STEPS {
+                self.steps.pop_front();
+            }
             self.steps.push_back(0);
         }
 
@@ -104,19 +106,19 @@ impl Chain {
         //  so we don't have to add proposal distribution density terms here
         let log_ratio: f64 = new_loglik - self.loglik;
 
-        log::debug!(
+        log::trace!(
             "step {}: log-c: {:?} -> {:?}",
             self.step_count,
             self.log_c.fit(),
             new_lcfit
         );
-        log::debug!(
+        log::trace!(
             "step {}: t: {:?} -> {:?}",
             self.step_count,
             self.t.fit(),
             new_tfit
         );
-        log::debug!(
+        log::trace!(
             "step {}: ll: {} -> {}",
             self.step_count,
             self.loglik,
@@ -131,16 +133,20 @@ impl Chain {
             self.loglik = new_loglik;
 
             // log acceptance
-            self.steps.pop_front();
+            if self.steps.len() >= N_RECENT_STEPS {
+                self.steps.pop_front();
+            }
             self.steps.push_back(1);
 
-            log::debug!("step {}: accepting", self.step_count);
+            log::trace!("step {}: accepting", self.step_count);
         } else {
             // reject
-            self.steps.pop_front();
+            if self.steps.len() >= N_RECENT_STEPS {
+                self.steps.pop_front();
+            }
             self.steps.push_back(0);
 
-            log::debug!("step {}: rejecting", self.step_count);
+            log::trace!("step {}: rejecting", self.step_count);
         }
 
         self.step_count += 1;
@@ -161,7 +167,9 @@ impl Chain {
             }
 
             self.sd = self.sd.min(100.);
-            self.sd = self.sd.max(5.);
+            self.sd = self.sd.max(0.01);
+
+            log::debug!("step {}: new sd {:0.05}", self.step_count, self.sd);
         }
     }
 
