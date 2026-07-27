@@ -329,6 +329,8 @@ enum Command {
 type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>, Vec<Box<[f64]>>);
 
 pub fn make_chain_df(chain_index: usize, chain_samples: ChainOutput) -> Result<LazyFrame> {
+    let n_rows = chain_samples.0.len();
+
     let ll = Column::new("loglik".into(), chain_samples.0);
 
     let n_samples: Vec<_> = chain_samples
@@ -352,7 +354,7 @@ pub fn make_chain_df(chain_index: usize, chain_samples: ChainOutput) -> Result<L
         .collect();
     let log_c_samples = Column::new("log_c".into(), log_c_samples);
 
-    let chain_df = DataFrame::new(vec![ll, n_samples, t_samples, log_c_samples])?;
+    let chain_df = DataFrame::new(n_rows, vec![ll, n_samples, t_samples, log_c_samples])?;
 
     let chain_df = chain_df
         .lazy()

@@ -9,21 +9,22 @@ color-eyre = "0.6.5"
 env_logger = { version = "0.11.8", features = ["humantime"] }
 indicatif = "0.18.3"
 indicatif-log-bridge = "0.2.3"
-itertools = "0.14.0"
+itertools = "0.15.0"
 log = "0.4.29"
 logsumexp = "0.1.0"
 ndarray = "0.17"
-polars = { version = "0.52.0", features = [
+polars = { version = "0.54.4", features = [
     "lazy",
     "timezones",
     "performant",
     "parquet",
+    "strings"
 ] }
 rand = { version = "0.10.0" }
 rand_distr = "0.6.0"
 rayon = "1.11.0"
-scirs2-optimize = "0.2.0"
-xsf = "0.3.6"
+scirs2-optimize = "0.6.2"
+xsf = "0.5.1"
 
 [dev-dependencies]
 criterion = "0.8"

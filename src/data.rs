@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{bail, Result, WrapErr};
 use polars::prelude::*;
 
 const MU: f64 = 1.29e-8;
@@ -14,8 +14,8 @@ pub struct SegmentDivergence {
 }
 
 pub fn read_divergences(path: PathBuf, fast: bool) -> Result<Box<[SegmentDivergence]>> {
-    let input = Arc::from(path);
-    let input = PlPath::Local(input);
+    let input = PlRefPath::try_from_path(&path)
+        .wrap_err_with(|| format!("invalid input path {}", path.display()))?;
 
     let schema = LazyFrame::scan_parquet(input.clone(), Default::default())?.collect_schema()?;
 
@@ -82,8 +82,8 @@ pub fn bootstrap_divergences(
     fast: bool,
     seed: u64,
 ) -> Result<Box<[SegmentDivergence]>> {
-    let input = Arc::from(path);
-    let input = PlPath::Local(input);
+    let input = PlRefPath::try_from_path(&path)
+        .wrap_err_with(|| format!("invalid input path: {}", path.display()))?;
 
     let schema = LazyFrame::scan_parquet(input.clone(), Default::default())?.collect_schema()?;
 
