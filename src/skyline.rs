@@ -140,7 +140,15 @@ impl SkylineChain {
                 // we get L*mu_bp from the data
                 // we want to fit with theta = 4 N_1 mu
                 let theta = 4. * s.mu * parameters.n_scale;
-                Observation::new(s.k, theta, &log_c, &t, parameters.adm_f, parameters.adm_idx)
+                Observation::new(
+                    s.k,
+                    theta,
+                    s.count,
+                    &log_c,
+                    &t,
+                    parameters.adm_f,
+                    parameters.adm_idx,
+                )
             })
             .collect();
 

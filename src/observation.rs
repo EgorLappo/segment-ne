@@ -7,6 +7,7 @@ use crate::parameter::{get_should_cache, get_tuples, ParameterList};
 pub struct Observation {
     k: f64,
     theta: f64,
+    count: f64,
     log_adm_f: f64,
     adm_idx: usize,
     // term cache goes here
@@ -17,6 +18,7 @@ impl Observation {
     pub fn new(
         k: f64,
         theta: f64,
+        count: u32,
         log_c: &ParameterList,
         t: &ParameterList,
         adm_f: f64,
@@ -53,6 +55,7 @@ impl Observation {
         Self {
             k,
             theta,
+            count: count as f64,
             term_cache,
             log_adm_f: adm_f.ln(),
             adm_idx,
@@ -107,7 +110,8 @@ impl Observation {
             }
         }
 
-        total.iter().ln_sum_exp()
+        // at the end, multiply by the total number of rows in the original data that have this observation
+        total.iter().ln_sum_exp() * self.count
     }
 }
 

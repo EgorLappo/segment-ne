@@ -21,6 +21,7 @@ pub fn optimize(data: &[SegmentDivergence], parameters: Parameters) -> Result<f6
             Observation::new(
                 s.k,
                 theta,
+                s.count,
                 &parameters.log_c,
                 &parameters.t,
                 parameters.adm_f,
@@ -107,6 +108,7 @@ pub fn optimize_multivariable(
             Observation::new(
                 s.k,
                 theta,
+                s.count,
                 &parameters.log_c,
                 &parameters.t,
                 parameters.adm_f,

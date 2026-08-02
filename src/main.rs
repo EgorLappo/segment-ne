@@ -40,9 +40,9 @@ fn main() -> Result<()> {
     )?;
 
     let data = if let Some(boot) = opts.boot {
-        data::bootstrap_divergences(opts.input, opts.fast, boot)?
+        data::bootstrap_divergences(opts.input, boot)?
     } else {
-        data::read_divergences(opts.input, opts.fast)?
+        data::read_divergences(opts.input)?
     };
 
     match opts.command {
@@ -219,13 +219,6 @@ struct Opts {
         help = "pass a seed to bootstrap the rows of the input table"
     )]
     boot: Option<u64>,
-    #[arg(
-        short,
-        long,
-        default_value_t = false,
-        help = "use fast computation (aggregate segments on each chromosome)"
-    )]
-    fast: bool,
     #[command(subcommand)]
     command: Command,
 }

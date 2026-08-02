@@ -10,10 +10,11 @@ const MU: f64 = 1.29e-8;
 #[derive(Debug, Copy, Clone)]
 pub struct SegmentDivergence {
     pub k: f64,
-    pub mu: f64, // mutation rate per segment, i.e. "length"
+    pub mu: f64,    // mutation rate per segment, i.e. "length"
+    pub count: u32, // count of data rows with these values of k and mu
 }
 
-pub fn read_divergences(path: PathBuf, fast: bool) -> Result<Box<[SegmentDivergence]>> {
+pub fn read_divergences(path: PathBuf) -> Result<Box<[SegmentDivergence]>> {
     let input = PlRefPath::try_from_path(&path)
         .wrap_err_with(|| format!("invalid input path {}", path.display()))?;
 
@@ -48,40 +49,32 @@ pub fn read_divergences(path: PathBuf, fast: bool) -> Result<Box<[SegmentDiverge
 
     let divs_seg = divs.with_column(pair)?.clone().lazy();
 
-    let divs_seg = if fast {
-        // if we want to make it faster, sum the observations by chromosome
-        divs_seg
-            .group_by(["pair_label", "chrom"])
-            .agg([col("intersection_len").sum(), col(diff_column).sum()])
-    } else {
-        divs_seg
-    };
+    let divs_counts = divs_seg
+        .group_by([diff_column, "intersection_len"])
+        .agg([len().alias("count")])
+        .collect()?;
 
-    let divs_seg = divs_seg.collect()?; //.filter(col(diff_column).gt(lit(0.0))).collect()?;
+    let diffs = divs_counts.column(diff_column)?.f64()?;
+    let lengths = divs_counts.column("intersection_len")?.f64()?;
+    let counts = divs_counts.column("count")?.u32()?;
 
-    let ans = divs_seg
-        .column(diff_column)?
-        .f64()?
+    let ans = diffs
         .iter()
-        .map(|x| x.unwrap())
-        .zip(
-            divs_seg
-                .column("intersection_len")?
-                .f64()?
-                .iter()
-                .map(|x| x.unwrap() * MU),
-        )
-        .map(|(k, mu)| SegmentDivergence { k, mu })
+        .zip(lengths.iter())
+        .zip(counts.iter())
+        .map(|((k, l), count)| {
+            let (k, l, count) = (k.unwrap(), l.unwrap(), count.unwrap());
+            // convert intersection length from basepairs to mutation units
+            let mu = l * MU;
+
+            SegmentDivergence { k, mu, count }
+        })
         .collect();
 
     Ok(ans)
 }
 
-pub fn bootstrap_divergences(
-    path: PathBuf,
-    fast: bool,
-    seed: u64,
-) -> Result<Box<[SegmentDivergence]>> {
+pub fn bootstrap_divergences(path: PathBuf, seed: u64) -> Result<Box<[SegmentDivergence]>> {
     let input = PlRefPath::try_from_path(&path)
         .wrap_err_with(|| format!("invalid input path: {}", path.display()))?;
 
@@ -116,14 +109,6 @@ pub fn bootstrap_divergences(
 
     let divs_seg = divs.with_column(pair)?.clone().lazy();
 
-    let divs_seg = if fast {
-        // if we want to make it faster, sum the observations by chromosome
-        divs_seg
-            .group_by(["pair_label", "chrom"])
-            .agg([col("intersection_len").sum(), col(diff_column).sum()])
-    } else {
-        divs_seg
-    };
     let divs_seg = divs_seg.collect()?.sample_frac(
         &Series::new("frac".into(), &[1.0f64]),
         true,
@@ -131,19 +116,27 @@ pub fn bootstrap_divergences(
         Some(seed),
     )?;
 
-    let ans = divs_seg
-        .column(diff_column)?
-        .f64()?
+    let divs_counts = divs_seg
+        .lazy()
+        .group_by([diff_column, "intersection_len"])
+        .agg([len().alias("count")])
+        .collect()?;
+
+    let diffs = divs_counts.column(diff_column)?.f64()?;
+    let lengths = divs_counts.column("intersection_len")?.f64()?;
+    let counts = divs_counts.column("count")?.u32()?;
+
+    let ans = diffs
         .iter()
-        .map(|x| x.unwrap())
-        .zip(
-            divs_seg
-                .column("intersection_len")?
-                .f64()?
-                .iter()
-                .map(|x| x.unwrap() * MU),
-        )
-        .map(|(k, mu)| SegmentDivergence { k, mu })
+        .zip(lengths.iter())
+        .zip(counts.iter())
+        .map(|((k, l), count)| {
+            let (k, l, count) = (k.unwrap(), l.unwrap(), count.unwrap());
+            // convert intersection length from basepairs to mutation units
+            let mu = l * MU;
+
+            SegmentDivergence { k, mu, count }
+        })
         .collect();
 
     Ok(ans)
