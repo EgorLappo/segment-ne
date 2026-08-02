@@ -14,6 +14,9 @@ const SD_INIT: f64 = 1.;
 const SD_UPDATE_RATE: f64 = 0.05;
 const N_RECENT_STEPS: usize = 100;
 
+// laplace prior for difference of population sizes
+const N_PRIOR_B: f64 = 0.1;
+
 #[derive(Debug, Clone)]
 pub struct Chain {
     n_scale: f64, // first population size for scaling
@@ -47,7 +50,8 @@ impl Chain {
 
         let param_tuples = get_tuples(&log_c, &t);
 
-        let loglik = obs.iter().map(|o| o.lpdf(&param_tuples)).sum();
+        let loglik =
+            obs.iter().map(|o| o.lpdf(&param_tuples)).sum::<f64>() + c_log_prior(log_c.fit());
 
         let steps = vec![0; 1].into();
 
@@ -99,7 +103,12 @@ impl Chain {
             self.steps.push_back(0);
         }
 
-        let new_loglik = self.obs.par_iter().map(|o| o.lpdf(&new_param_tuples)).sum();
+        let new_loglik = self
+            .obs
+            .par_iter()
+            .map(|o| o.lpdf(&new_param_tuples))
+            .sum::<f64>()
+            + c_log_prior(&new_lcfit);
 
         // NOTE to future self:
         //  we use *symmetric* gaussian proposal
@@ -107,22 +116,10 @@ impl Chain {
         let log_ratio: f64 = new_loglik - self.loglik;
 
         log::trace!(
-            "step {}: log-c: {:?} -> {:?}",
+            "step {}: delta ll: {} -> {}",
             self.step_count,
-            self.log_c.fit(),
-            new_lcfit
-        );
-        log::trace!(
-            "step {}: t: {:?} -> {:?}",
-            self.step_count,
-            self.t.fit(),
-            new_tfit
-        );
-        log::trace!(
-            "step {}: ll: {} -> {}",
-            self.step_count,
-            self.loglik,
-            new_loglik
+            log_ratio,
+            log_ratio.exp()
         );
 
         if rand::random::<f64>() <= log_ratio.exp() {
@@ -137,16 +134,12 @@ impl Chain {
                 self.steps.pop_front();
             }
             self.steps.push_back(1);
-
-            log::trace!("step {}: accepting", self.step_count);
         } else {
             // reject
             if self.steps.len() >= N_RECENT_STEPS {
                 self.steps.pop_front();
             }
             self.steps.push_back(0);
-
-            log::trace!("step {}: rejecting", self.step_count);
         }
 
         self.step_count += 1;
@@ -223,6 +216,14 @@ impl Chain {
 
         (lls, n_samples, t_samples, log_c_samples)
     }
+}
+
+fn c_log_prior(ns: &[f64]) -> f64 {
+    ns.iter()
+        .zip(ns.iter().skip(1))
+        // log laplace density
+        .map(|(x, y)| -(x - y).abs() / N_PRIOR_B)
+        .sum()
 }
 
 // fn get_loglik(obs: &[Observation], n: &[f64], t: &[f64]) -> f64 {

@@ -84,7 +84,7 @@ impl Observation {
                     //     we observe more coalescences in before admixture on archaic segments,
                     //     since to coalesce after admixture both lineages must move to the
                     //     right admixing (e.g.neanderthal) population)
-                    // so, we weigh segments before admixture we with admix_fraction
+                    // so, we weigh coalescences before admixture we with admix_fraction
                     //    and those after with admix_fraction^2, and, of course,
                     //    we do not care about constant terms so divide both by admix_fraction
 

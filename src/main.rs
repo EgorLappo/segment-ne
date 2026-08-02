@@ -70,20 +70,6 @@ fn main() -> Result<()> {
                 writeln!(file, "{:?}", t.iter().format(" "))?;
             }
         }
-        Command::Single => {
-            let total_fit_params = parameters.t.num_fit() + parameters.log_c.num_fit();
-            if total_fit_params != 1 {
-                bail!("no parameters to be fit were provided (please annotate them with '~') or more that one parameter specified (invalid for this command)!")
-            } else {
-                let result = optim::optimize_singles(&data, parameters)?;
-
-                let mut file = std::fs::File::create(opts.output)?;
-                writeln!(file, "k,mu,val")?;
-                for (segd, val) in data.iter().zip(result) {
-                    writeln!(file, "{:?},{:?},{:?}", segd.k, segd.mu, val)?;
-                }
-            }
-        }
         Command::Sample {
             seed,
             chains,
@@ -247,7 +233,6 @@ struct Opts {
 #[derive(Debug, Clone, Subcommand)]
 enum Command {
     Optim,
-    Single,
     Sample {
         #[arg(
             short,

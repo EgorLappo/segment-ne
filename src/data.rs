@@ -57,7 +57,7 @@ pub fn read_divergences(path: PathBuf, fast: bool) -> Result<Box<[SegmentDiverge
         divs_seg
     };
 
-    let divs_seg = divs_seg.filter(col(diff_column).gt(lit(0.0))).collect()?;
+    let divs_seg = divs_seg.collect()?; //.filter(col(diff_column).gt(lit(0.0))).collect()?;
 
     let ans = divs_seg
         .column(diff_column)?
@@ -124,15 +124,12 @@ pub fn bootstrap_divergences(
     } else {
         divs_seg
     };
-    let divs_seg = divs_seg
-        .filter(col(diff_column).gt(lit(0.0)))
-        .collect()?
-        .sample_frac(
-            &Series::new("frac".into(), &[1.0f64]),
-            true,
-            false,
-            Some(seed),
-        )?;
+    let divs_seg = divs_seg.collect()?.sample_frac(
+        &Series::new("frac".into(), &[1.0f64]),
+        true,
+        false,
+        Some(seed),
+    )?;
 
     let ans = divs_seg
         .column(diff_column)?

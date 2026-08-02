@@ -137,6 +137,9 @@ impl Parameters {
             )
         }
 
+        // TODO: bug here. if skyline has many segments and we put index in the middle,
+        //   could falsely claim out-of-bounds even though valid.
+        //   need to compare not with pop_sizes.len() but with pop_sizes - 1 + n_intervals
         if admixture_index == 0 || admixture_index >= pop_sizes.len() {
             bail!(
                 "provided invalid admixture index {}. it must lie between provided constant population size segments",
