@@ -15,7 +15,7 @@ const SD_UPDATE_RATE: f64 = 0.05;
 const N_RECENT_STEPS: usize = 100;
 
 // laplace prior for difference of population sizes
-const N_PRIOR_B: f64 = 0.1;
+const N_PRIOR_B: f64 = 1.;
 
 #[derive(Debug, Clone)]
 pub struct Chain {
@@ -28,6 +28,7 @@ pub struct Chain {
     step_count: usize,
     // store recent
     steps: VecDeque<u8>,
+    warmup: bool,
 }
 
 type ChainOutput = (Vec<f64>, Vec<Box<[f64]>>, Vec<Box<[f64]>>, Vec<Box<[f64]>>);
@@ -64,6 +65,7 @@ impl Chain {
             sd: SD_INIT,
             step_count: 0,
             steps,
+            warmup: true,
         }
     }
 
@@ -145,7 +147,7 @@ impl Chain {
         self.step_count += 1;
 
         // update acceptance rate to be ~30%
-        if (self.step_count > 500) && self.step_count.is_multiple_of(100) {
+        if self.warmup && self.step_count.is_multiple_of(100) {
             let acc_rate = self.steps.iter().sum::<u8>() as usize;
             log::debug!(
                 "step {}: acceptance rate {:.02}, sd {:.02}",
@@ -193,6 +195,8 @@ impl Chain {
 
             pb.inc(1);
         }
+
+        self.warmup = false;
 
         pb.set_prefix("sampling");
         for _ in 0..sampling {
